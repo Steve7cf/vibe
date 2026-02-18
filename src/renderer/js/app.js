@@ -1,107 +1,101 @@
-/**
- * Vibe Music Player — App Entry Point
- * Orchestrates all modules and initializes the application
- */
+const App = {
+  config: {},
 
-import { StateManager } from './state.js';
-import { AudioEngine } from './audio.js';
-import { LibraryManager } from './library.js';
-import { PlaylistManager } from './playlists.js';
-import { UIController } from './ui.js';
-import { PlayerController } from './player.js';
-import { EqualizerController } from './equalizer.js';
-import { VisualizerController } from './visualizer.js';
-import { SettingsController } from './settings.js';
-import { DragDropHandler } from './dragdrop.js';
-import { ContextMenu } from './contextmenu.js';
-import { Toast } from './toast.js';
-import { QueueManager } from './queue.js';
+  async init() {
+    this.config = await window.vibeAPI.getConfig();
+    await Library.init();
+    AudioEngine.init();
+    Player.init();
+    Visualizer.init();
+    Equalizer.init();
+    UI.init();
+    this._applyConfig();
+    this._bindGlobalEvents();
+    UI.showView('home');
+    UI.renderSidebarPlaylists();
+    Visualizer.setMode(this.config.visualizerMode || 'bars');
+  },
 
-// ─── Bootstrap ────────────────────────────────────────────────────────────────
-async function bootstrap() {
-  console.log('🎵 Vibe starting up...');
+  _applyConfig() {
+    AudioEngine.setVolume(this.config.volume ?? 0.8);
+    AudioEngine.setBalance(this.config.balance ?? 0);
+    AudioEngine.setSpeed(this.config.speed ?? 1);
+    AudioEngine.config.crossfade = this.config.crossfade ?? 3;
+    AudioEngine.config.fadeIn = this.config.fadeIn !== false;
+    AudioEngine.config.fadeOut = this.config.fadeOut !== false;
+    Player.shuffle = this.config.shuffle || false;
+    Player.repeat = this.config.repeat || 'off';
 
-  // Load persisted config + session
-  const [config, session, library, playlists] = await Promise.all([
-    window.vibeAPI.invoke('config:load'),
-    window.vibeAPI.invoke('session:load'),
-    window.vibeAPI.invoke('library:load'),
-    window.vibeAPI.invoke('playlists:load'),
-  ]);
+    document.getElementById('btn-shuffle')?.classList.toggle('active', Player.shuffle);
+    Player._updateRepeatBtn?.();
+    Equalizer.applyFromConfig(this.config);
+    UI.applySettings(this.config);
 
-  // Apply accent color from config
-  if (config.theme?.accentColor) {
-    document.documentElement.style.setProperty('--accent', config.theme.accentColor);
-    // Recompute derived colors
-    setDerivedColors(config.theme.accentColor);
+    // Restore last track
+    if (this.config.lastTrackId) {
+      const track = Library.tracks.find(t => t.id === this.config.lastTrackId);
+      if (track) {
+        Player.currentTrack = track;
+        Player.queue = [...Library.tracks];
+        Player.originalQueue = [...Library.tracks];
+        Player.currentIndex = Player.queue.findIndex(t => t.id === track.id);
+        AudioEngine.load(track).then(() => {
+          if (this.config.lastPosition > 0) AudioEngine.seekTo(this.config.lastPosition);
+          Player._updateUI();
+        });
+      }
+    }
+  },
+
+  _bindGlobalEvents() {
+    window.vibeAPI.onTrayAction(action => {
+      if (action === 'playpause') Player.toggle();
+      else if (action === 'next') Player.next();
+      else if (action === 'prev') Player.prev();
+    });
+    window.vibeAPI.onGlobalShortcut(action => {
+      if (action === 'playpause') Player.toggle();
+      else if (action === 'next') Player.next();
+      else if (action === 'prev') Player.prev();
+      else if (action === 'stop') Player.stop();
+    });
+
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+      switch(e.code) {
+        case 'Space': e.preventDefault(); Player.toggle(); break;
+        case 'ArrowRight': if (e.ctrlKey || e.metaKey) Player.next(); else AudioEngine.seekTo(AudioEngine.currentTime + 5); break;
+        case 'ArrowLeft': if (e.ctrlKey || e.metaKey) Player.prev(); else AudioEngine.seekTo(AudioEngine.currentTime - 5); break;
+        case 'ArrowUp': e.preventDefault(); { const v = Math.min(1, AudioEngine.config.volume + 0.05); AudioEngine.setVolume(v); document.getElementById('volume-slider').value = v; UI._updateVolSlider(v); } break;
+        case 'ArrowDown': e.preventDefault(); { const v = Math.max(0, AudioEngine.config.volume - 0.05); AudioEngine.setVolume(v); document.getElementById('volume-slider').value = v; UI._updateVolSlider(v); } break;
+        case 'KeyM': UI._toggleMute(); break;
+        case 'KeyS': if (e.ctrlKey || e.metaKey) { e.preventDefault(); Player.toggleShuffle(); } break;
+        case 'KeyR': if (e.ctrlKey || e.metaKey) { e.preventDefault(); Player.cycleRepeat(); } break;
+      }
+    });
+
+    window.addEventListener('beforeunload', () => this._saveSession());
+    setInterval(() => this._saveSession(), 15000);
+  },
+
+  _saveSession() {
+    this.config.lastTrackId = Player.currentTrack?.id || null;
+    this.config.lastPosition = AudioEngine.currentTime || 0;
+    this.saveSettings();
+  },
+
+  updateConfig(key, value) {
+    this.config[key] = value;
+    this.saveSettings();
+  },
+
+  saveSettings() {
+    this.config.shuffle = Player.shuffle;
+    this.config.repeat = Player.repeat;
+    this.config.volume = AudioEngine.config.volume;
+    this.config.eq = { enabled: Equalizer.enabled, bands: [...Equalizer.bands] };
+    window.vibeAPI.saveConfig(this.config);
   }
+};
 
-  // Initialize state manager (global store)
-  const state = new StateManager({ config, session, library, playlists });
-  window.__vibeState = state; // debug access
-
-  // Initialize audio engine
-  const audio = new AudioEngine(state);
-  await audio.init();
-
-  // Initialize sub-systems
-  const queue = new QueueManager(state, audio);
-  const library_mgr = new LibraryManager(state, audio, queue);
-  const playlists_mgr = new PlaylistManager(state, audio, queue);
-  const equalizer = new EqualizerController(state, audio);
-  const visualizer = new VisualizerController(audio);
-  const toast = new Toast();
-  const contextMenu = new ContextMenu(state, audio, queue, library_mgr, playlists_mgr, toast);
-  const player = new PlayerController(state, audio, queue, visualizer, toast);
-  const ui = new UIController(state, library_mgr, playlists_mgr, queue, player, toast, contextMenu);
-  const settings = new SettingsController(state, audio, equalizer, library_mgr, toast);
-  const dragdrop = new DragDropHandler(state, library_mgr, queue, toast);
-
-  // Set up IPC listeners from main process
-  setupIPCListeners(player, queue, toast);
-
-  // Restore session (last played track, queue, volume, etc.)
-  if (config.system.restoreSession) {
-    player.restoreSession(session);
-  }
-
-  // Initial render
-  ui.render();
-
-  // Auto-scan library folders if configured
-  if (config.library.scanOnStart && config.library.folders.length > 0) {
-    library_mgr.scanFolders(config.library.folders);
-  }
-
-  // Show app (remove loading if any)
-  document.body.classList.add('app-ready');
-  console.log('✅ Vibe ready!');
-}
-
-function setDerivedColors(hex) {
-  // Compute dim/glow from hex
-  document.documentElement.style.setProperty(
-    '--accent-glow',
-    hex + '40' // 25% opacity
-  );
-}
-
-function setupIPCListeners(player, queue, toast) {
-  // Tray / global shortcut commands
-  window.vibeAPI.on('tray:playPause', () => player.togglePlay());
-  window.vibeAPI.on('tray:next', () => player.next());
-  window.vibeAPI.on('tray:prev', () => player.previous());
-  window.vibeAPI.on('tray:stop', () => player.stop());
-
-  window.vibeAPI.on('shortcut:playPause', () => player.togglePlay());
-  window.vibeAPI.on('shortcut:next', () => player.next());
-  window.vibeAPI.on('shortcut:prev', () => player.previous());
-  window.vibeAPI.on('shortcut:stop', () => player.stop());
-}
-
-// ─── Start ────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-  bootstrap().catch(err => {
-    console.error('Fatal startup error:', err);
-  });
-});
+document.addEventListener('DOMContentLoaded', () => App.init());
