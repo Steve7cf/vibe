@@ -27,7 +27,7 @@
       ],
       "category": "Audio",
       "maintainer": "Steve Bazaar <stevebazaar99@gmail.com>",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "desktop": {
         "Name": "Vibe",
         "Comment": "Professional Music Player",
