@@ -2,6 +2,7 @@
   "name": "vibe",
   "version": "1.0.0",
   "description": "Vibe - Professional Desktop Music Player",
+  "homepage": "https://github.com/yourname/vibe",
   "main": "src/main/main.js",
   "scripts": {
     "start": "GDK_BACKEND=x11 ELECTRON_DISABLE_SECURITY_WARNINGS=1 electron .",
@@ -17,7 +18,8 @@
         "AppImage",
         "deb"
       ],
-      "category": "Audio"
+      "category": "Audio",
+      "maintainer": "Steve Bazaar <stevebazaar99@gmail.com>"
     },
     "files": [
       "src/**/*",
@@ -40,6 +42,9 @@
     "player",
     "electron"
   ],
-  "author": "Steve Bazaar",
+  "author": {
+    "name": "Steve Bazaar",
+    "email": "stevebazaar99@gmail.com"
+  },
   "license": "MIT"
 }
