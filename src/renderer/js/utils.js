@@ -1,106 +1,64 @@
-const Utils = {
-  formatTime(sec) {
-    if (!sec || isNaN(sec) || !isFinite(sec)) return '0:00';
-    sec = Math.floor(sec);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
-  },
+/**
+ * Vibe — Utility Functions
+ */
 
-  sanitize(str) {
-    if (!str) return '';
-    return String(str).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
-  },
+export function formatTime(seconds) {
+  if (!seconds || isNaN(seconds)) return '0:00';
+  const s = Math.floor(seconds);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  if (h > 0) return `${h}:${pad(m % 60)}:${pad(s % 60)}`;
+  return `${m}:${pad(s % 60)}`;
+}
 
-  generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  },
+export function formatDate(ts) {
+  return new Date(ts).toLocaleDateString();
+}
 
-  debounce(fn, delay) {
-    let t;
-    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
-  },
+function pad(n) { return String(n).padStart(2, '0'); }
 
-  showToast(msg, duration = 2800) {
-    let container = document.getElementById('toast-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'toast-container';
-      document.body.appendChild(container);
-    }
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = msg;
-    container.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s';
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
-  },
+export function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
 
-  showModal(title, body, onOk, okLabel = 'OK') {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-body').innerHTML = body;
-    document.getElementById('modal-ok').textContent = okLabel;
-    document.getElementById('modal-overlay').classList.remove('hidden');
-    const close = () => document.getElementById('modal-overlay').classList.add('hidden');
-    document.getElementById('modal-ok').onclick = () => { onOk && onOk(); close(); };
-    document.getElementById('modal-cancel').onclick = close;
-    document.getElementById('modal-overlay').onclick = (e) => { if (e.target.id === 'modal-overlay') close(); };
-    setTimeout(() => document.getElementById('modal-body').querySelector('input')?.focus(), 60);
-  },
-
-  extensionToFormat(p) {
-    return (p || '').split('.').pop().toUpperCase() || '?';
-  },
-
-  // Extract dominant color from an image data URL using canvas
-  extractColors(dataUrl) {
-    return new Promise((resolve) => {
-      if (!dataUrl) { resolve(null); return; }
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64; canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, 64, 64);
-        const data = ctx.getImageData(0, 0, 64, 64).data;
-        // Sample pixels, bucket colors
-        const buckets = {};
-        for (let i = 0; i < data.length; i += 16) {
-          const r = Math.round(data[i] / 32) * 32;
-          const g = Math.round(data[i+1] / 32) * 32;
-          const b = Math.round(data[i+2] / 32) * 32;
-          const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-          if (brightness < 20 || brightness > 235) continue; // skip near-black/white
-          const key = `${r},${g},${b}`;
-          buckets[key] = (buckets[key] || 0) + 1;
-        }
-        const sorted = Object.entries(buckets).sort((a, b) => b[1] - a[1]);
-        if (!sorted.length) { resolve(null); return; }
-        const [r, g, b] = sorted[0][0].split(',').map(Number);
-        // Make it more vivid
-        const max = Math.max(r, g, b);
-        const factor = max > 0 ? Math.min(255 / max, 2.5) : 1;
-        const vr = Math.min(255, Math.round(r * factor));
-        const vg = Math.min(255, Math.round(g * factor));
-        const vb = Math.min(255, Math.round(b * factor));
-        resolve({ r: vr, g: vg, b: vb, hex: `#${vr.toString(16).padStart(2,'0')}${vg.toString(16).padStart(2,'0')}${vb.toString(16).padStart(2,'0')}` });
-      };
-      img.onerror = () => resolve(null);
-      img.src = dataUrl;
-    });
-  },
-
-  applyThemeColor(hex) {
-    if (!hex) return;
-    document.documentElement.style.setProperty('--accent', hex);
-  },
-
-  restoreThemeColor() {
-    const cfg = App?.config;
-    const color = cfg?.accentColor || '#1db954';
-    document.documentElement.style.setProperty('--accent', color);
+export function artworkOrPlaceholder(artworkUrl, iconSize = 32, extraStyle = '') {
+  if (artworkUrl) {
+    return `<img src="${artworkUrl}" alt="artwork" style="width:100%;height:100%;object-fit:cover;${extraStyle}" />`;
   }
-};
+  return `
+    <div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:var(--text-muted);${extraStyle}">
+      <svg viewBox="0 0 24 24" style="width:${iconSize}px;height:${iconSize}px;">
+        <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" fill="currentColor"/>
+      </svg>
+    </div>`;
+}
+
+export function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+export function throttle(fn, ms) {
+  let last = 0;
+  return (...args) => {
+    const now = Date.now();
+    if (now - last >= ms) { last = now; fn(...args); }
+  };
+}
+
+export function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+export function formatTrackMeta(track) {
+  const parts = [];
+  if (track.artist) parts.push(track.artist);
+  if (track.album) parts.push(track.album);
+  if (track.year) parts.push(track.year);
+  return parts.join(' • ');
+}
