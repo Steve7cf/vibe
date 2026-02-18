@@ -13,25 +13,67 @@
   "build": {
     "appId": "com.vibe.musicplayer",
     "productName": "Vibe",
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ],
-      "category": "Audio",
-      "maintainer": "Steve Bazaar <stevebazaar99@gmail.com>"
-    },
     "files": [
       "src/**/*",
       "package.json"
     ],
     "directories": {
       "output": "dist"
-    }
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Audio",
+      "maintainer": "Steve Bazaar <stevebazaar99@gmail.com>",
+      "icon": "build/icon.png",
+      "desktop": {
+        "Name": "Vibe",
+        "Comment": "Professional Music Player",
+        "Categories": "Audio;Player;",
+        "StartupWMClass": "Vibe"
+      },
+      "mimeTypes": [
+        "audio/mpeg",
+        "audio/flac",
+        "audio/wav",
+        "audio/ogg",
+        "audio/x-m4a"
+      ]
+    },
+    "fileAssociations": [
+      {
+        "ext": "mp3",
+        "name": "MP3 Audio",
+        "role": "Editor"
+      },
+      {
+        "ext": "flac",
+        "name": "FLAC Audio",
+        "role": "Editor"
+      },
+      {
+        "ext": "wav",
+        "name": "WAV Audio",
+        "role": "Editor"
+      },
+      {
+        "ext": "ogg",
+        "name": "OGG Audio",
+        "role": "Editor"
+      },
+      {
+        "ext": "m4a",
+        "name": "M4A Audio",
+        "role": "Editor"
+      }
+    ]
   },
   "dependencies": {
     "music-metadata": "^10.0.0",
-    "node-id3": "^0.2.6"
+    "node-id3": "^0.2.6",
+    "mpris-service": "^2.1.2"
   },
   "devDependencies": {
     "electron": "^28.0.0",
@@ -40,7 +82,9 @@
   "keywords": [
     "music",
     "player",
-    "electron"
+    "audio",
+    "electron",
+    "linux"
   ],
   "author": {
     "name": "Steve Bazaar",
