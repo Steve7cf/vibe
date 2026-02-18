@@ -2,7 +2,7 @@
   "name": "vibe",
   "version": "1.0.0",
   "description": "Vibe - Professional Desktop Music Player",
-  "homepage": "https://github.com/yourname/vibe",
+  "homepage": "https://github.com/Steve7cf/vibe",
   "main": "src/main/main.js",
   "scripts": {
     "start": "GDK_BACKEND=x11 ELECTRON_DISABLE_SECURITY_WARNINGS=1 electron .",
