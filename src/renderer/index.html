@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe</title>
+<link rel="stylesheet" href="css/main.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="app">
+
+  <!-- TITLEBAR -->
+  <div id="titlebar">
+    <div class="titlebar-left">
+      <div class="logo-mark">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" fill="var(--accent)"/>
+          <path d="M8 12a4 4 0 0 1 4-4v8a4 4 0 0 1-4-4z" fill="#000"/>
+          <circle cx="12" cy="12" r="2" fill="#000"/>
+        </svg>
+      </div>
+      <span class="app-name">Vibe</span>
+    </div>
+    <div class="titlebar-drag"></div>
+    <div class="titlebar-right">
+      <div class="search-wrap">
+        <svg class="search-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="search-input" placeholder="Search music…" autocomplete="off">
+        <button id="search-clear" class="search-clear">✕</button>
+      </div>
+      <button class="topbar-btn" id="btn-add-files">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+        <span class="btn-label">Add Files</span>
+      </button>
+      <button class="topbar-btn" id="btn-scan-folder">
+        <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span class="btn-label">Scan Folder</span>
+      </button>
+    </div>
+    <div class="titlebar-controls">
+      <button class="win-btn" id="btn-minimize">&#8722;</button>
+      <button class="win-btn" id="btn-maximize">&#9633;</button>
+      <button class="win-btn close" id="btn-close">&#10005;</button>
+    </div>
+  </div>
+
+  <!-- LAYOUT -->
+  <div id="layout">
+
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-view="home">
+          <svg viewBox="0 0 24 24"><path d="M3 9.5L12 3l9 6.5V20a1 1 0 01-1 1H4a1 1 0 01-1-1V9.5z"/><path d="M9 21V12h6v9"/></svg>
+          <span>Home</span>
+        </button>
+        <button class="nav-btn" data-view="library">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <span>Library</span>
+        </button>
+        <button class="nav-btn" data-view="queue">
+          <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          <span>Queue</span>
+        </button>
+        <button class="nav-btn" data-view="playlists">
+          <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          <span>Playlists</span>
+        </button>
+        <button class="nav-btn" data-view="equalizer">
+          <svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+          <span>Equalizer</span>
+        </button>
+        <button class="nav-btn" data-view="settings">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06A1.65 1.65 0 0 0 15 19.4a1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
+        </button>
+      </nav>
+      <div class="sidebar-playlists" id="sidebar-playlists">
+        <div class="sidebar-section-title">PLAYLISTS</div>
+        <div id="playlist-list-sidebar"></div>
+        <button class="create-playlist-btn" id="create-playlist-btn">+ New Playlist</button>
+      </div>
+    </aside>
+
+    <!-- CONTENT -->
+    <main id="content">
+      <!-- HOME -->
+      <div id="view-home" class="view active"></div>
+
+      <!-- LIBRARY -->
+      <div id="view-library" class="view">
+        <div class="view-header">
+          <h2>Library</h2>
+          <div class="library-tabs">
+            <button class="lib-tab active" data-tab="all">All Tracks</button>
+            <button class="lib-tab" data-tab="artists">Artists</button>
+            <button class="lib-tab" data-tab="albums">Albums</button>
+            <button class="lib-tab" data-tab="genres">Genres</button>
+          </div>
+        </div>
+        <div id="library-content"></div>
+      </div>
+
+      <!-- QUEUE -->
+      <div id="view-queue" class="view">
+        <div class="view-header">
+          <h2>Queue</h2>
+          <div class="queue-actions">
+            <button class="ghost-btn" id="shuffle-queue">⇄ Shuffle</button>
+            <button class="ghost-btn danger" id="clear-queue">Clear</button>
+          </div>
+        </div>
+        <div id="queue-list"></div>
+      </div>
+
+      <!-- PLAYLISTS -->
+      <div id="view-playlists" class="view">
+        <div class="view-header">
+          <h2>Playlists</h2>
+          <div style="display:flex;gap:8px">
+            <button class="ghost-btn" id="import-playlist-btn">Import M3U</button>
+            <button class="accent-btn" id="new-playlist-btn">+ Create Playlist</button>
+          </div>
+        </div>
+        <div id="playlists-grid"></div>
+        <div id="playlist-detail" class="hidden">
+          <button class="back-btn" id="playlist-back">← Back to Playlists</button>
+          <div id="playlist-detail-content"></div>
+        </div>
+      </div>
+
+      <!-- EQUALIZER -->
+      <div id="view-equalizer" class="view">
+        <div class="view-header"><h2>Equalizer</h2></div>
+        <div id="eq-panel">
+          <div class="eq-header">
+            <label class="toggle-label"><input type="checkbox" id="eq-enabled"><span class="toggle"></span><span>Enable EQ</span></label>
+            <select id="eq-preset">
+              <option value="flat">Flat</option><option value="pop">Pop</option>
+              <option value="rock">Rock</option><option value="jazz">Jazz</option>
+              <option value="classical">Classical</option><option value="electronic">Electronic</option>
+              <option value="hiphop">Hip Hop</option><option value="bass">Bass Boost</option>
+              <option value="treble">Treble Boost</option><option value="vocal">Vocal</option>
+            </select>
+          </div>
+          <div class="eq-bands" id="eq-bands"></div>
+          <div class="eq-extra">
+            <div class="eq-control"><label>Bass Boost</label><input type="range" id="bass-boost" min="0" max="20" value="0" step="1"><span id="bass-boost-val">0 dB</span></div>
+            <div class="eq-control"><label>Surround</label><input type="range" id="surround" min="0" max="10" value="0" step="1"><span id="surround-val">0</span></div>
+            <div class="eq-control"><label>Replay Gain</label><label class="toggle-label"><input type="checkbox" id="replay-gain"><span class="toggle"></span></label></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS -->
+      <div id="view-settings" class="view">
+        <div class="view-header"><h2>Settings</h2></div>
+        <div id="settings-panel">
+          <div class="settings-section">
+            <h3>Playback</h3>
+            <div class="setting-row"><label>Crossfade Duration</label><input type="range" id="s-crossfade" min="0" max="12" value="3" step="1"><span id="s-crossfade-val">3s</span></div>
+            <div class="setting-row"><label>Fade In on Track Start</label><label class="toggle-label"><input type="checkbox" id="s-fadein" checked><span class="toggle"></span></label></div>
+            <div class="setting-row"><label>Fade Out on Track End</label><label class="toggle-label"><input type="checkbox" id="s-fadeout" checked><span class="toggle"></span></label></div>
+            <div class="setting-row"><label>Playback Speed</label><input type="range" id="s-speed" min="0.5" max="2" value="1" step="0.05"><span id="s-speed-val">1.00x</span></div>
+            <div class="setting-row"><label>Balance (L/R)</label><input type="range" id="s-balance" min="-1" max="1" value="0" step="0.01"><span id="s-balance-val">Center</span></div>
+          </div>
+          <div class="settings-section">
+            <h3>Appearance</h3>
+            <div class="setting-row"><label>Accent Color</label><input type="color" id="s-accent" value="#1db954"></div>
+            <div class="setting-row">
+              <label>Use Album Art Colors</label>
+              <label class="toggle-label"><input type="checkbox" id="s-use-album-colors"><span class="toggle"></span></label>
+            </div>
+            <div class="setting-row" id="album-color-preview-row" style="display:none">
+              <label>Current palette derived from now-playing artwork automatically</label>
+            </div>
+            <div class="setting-row"><label>Visualizer Mode</label>
+              <select id="s-visualizer"><option value="bars">Bars</option><option value="wave">Wave</option><option value="circle">Circle</option><option value="off">Off</option></select>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h3>Behavior</h3>
+            <div class="setting-row"><label>Show Notifications</label><label class="toggle-label"><input type="checkbox" id="s-notifications" checked><span class="toggle"></span></label></div>
+            <div class="setting-row"><label>Global Media Keys</label><label class="toggle-label"><input type="checkbox" id="s-hotkeys" checked><span class="toggle"></span></label></div>
+            <div class="setting-row"><label>Autoplay on Start</label><label class="toggle-label"><input type="checkbox" id="s-autoplay"><span class="toggle"></span></label></div>
+            <div class="setting-row"><label>Sleep Timer (minutes, 0 = off)</label><input type="number" id="s-sleep" min="0" max="480" value="0" class="num-input"><button class="ghost-btn" id="set-sleep">Set</button></div>
+          </div>
+          <div class="settings-section">
+            <h3>Library Folders</h3>
+            <div id="library-folders"></div>
+            <div style="display:flex;gap:8px;margin-top:4px">
+              <button class="ghost-btn" id="add-library-folder">+ Add Folder</button>
+              <button class="ghost-btn danger" id="clear-library">Clear Library</button>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h3>Keyboard Shortcuts</h3>
+            <div class="shortcuts-grid">
+              <div class="shortcut-row"><span>Play / Pause</span><kbd>Space</kbd></div>
+              <div class="shortcut-row"><span>Next Track</span><kbd>Ctrl →</kbd></div>
+              <div class="shortcut-row"><span>Previous Track</span><kbd>Ctrl ←</kbd></div>
+              <div class="shortcut-row"><span>Seek +5s</span><kbd>→</kbd></div>
+              <div class="shortcut-row"><span>Seek −5s</span><kbd>←</kbd></div>
+              <div class="shortcut-row"><span>Volume Up</span><kbd>↑</kbd></div>
+              <div class="shortcut-row"><span>Volume Down</span><kbd>↓</kbd></div>
+              <div class="shortcut-row"><span>Mute</span><kbd>M</kbd></div>
+              <div class="shortcut-row"><span>Shuffle</span><kbd>Ctrl S</kbd></div>
+              <div class="shortcut-row"><span>Repeat</span><kbd>Ctrl R</kbd></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- NOW PLAYING SIDE PANEL -->
+    <div id="side-panel">
+      <div id="visualizer-wrap">
+        <canvas id="visualizer"></canvas>
+        <div id="side-artwork" class="side-artwork">
+          <div class="artwork-img" id="side-art-img"></div>
+          <div class="artwork-placeholder">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="var(--text-muted)"/></svg>
+          </div>
+        </div>
+      </div>
+      <div class="side-track-info">
+        <div class="side-title" id="side-title">No track playing</div>
+        <div class="side-artist" id="side-artist"></div>
+        <div class="side-album" id="side-album"></div>
+      </div>
+      <div id="lyrics-panel">
+        <div class="lyrics-title">LYRICS</div>
+        <div id="lyrics-content" class="lyrics-placeholder">No lyrics available</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PLAYER BAR -->
+  <div id="player-bar">
+    <div class="player-track">
+      <div class="player-artwork" id="player-art">
+        <div class="art-placeholder-inner">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+      </div>
+      <div class="player-info">
+        <div class="player-title" id="player-title">—</div>
+        <div class="player-artist" id="player-artist"></div>
+      </div>
+      <button class="heart-btn" id="btn-like" title="Like">♡</button>
+    </div>
+
+    <div class="player-center">
+      <div class="player-controls">
+        <button class="ctrl-btn" id="btn-shuffle" title="Shuffle">
+          <svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-prev" title="Previous">
+          <svg viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+        </button>
+        <button class="ctrl-btn play-btn" id="btn-play" title="Play/Pause">
+          <svg id="play-icon" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
+          <svg id="pause-icon" class="hidden" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-next" title="Next">
+          <svg viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+        </button>
+        <button class="ctrl-btn" id="btn-repeat" title="Repeat">
+          <svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        </button>
+      </div>
+      <div class="seek-row">
+        <span id="time-current">0:00</span>
+        <div class="seek-bar-wrap">
+          <div class="seek-bar" id="seek-bar">
+            <div class="seek-fill" id="seek-fill"></div>
+            <div class="seek-thumb" id="seek-thumb"></div>
+          </div>
+        </div>
+        <span id="time-total">0:00</span>
+      </div>
+    </div>
+
+    <div class="player-right">
+      <button class="ctrl-btn sm" id="btn-stop" title="Stop">
+        <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" fill="currentColor"/></svg>
+      </button>
+      <button class="ctrl-btn sm" id="btn-mini" title="Minimize">
+        <svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+      <div class="volume-wrap">
+        <button class="ctrl-btn sm" id="btn-mute" title="Mute">
+          <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        </button>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.8">
+      </div>
+      <button class="ctrl-btn sm" id="btn-speed-toggle" title="Playback Speed">
+        <span id="speed-label">1x</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SPEED POPUP -->
+<div id="speed-popup" class="popup hidden">
+  <div class="popup-title">Playback Speed</div>
+  <input type="range" id="popup-speed" min="0.5" max="2" step="0.05" value="1">
+  <span id="popup-speed-val">1.00x</span>
+</div>
+
+<!-- CONTEXT MENU -->
+<div id="context-menu" class="context-menu hidden">
+  <div class="ctx-item" id="ctx-play">▶ Play</div>
+  <div class="ctx-item" id="ctx-play-next">▷ Play Next</div>
+  <div class="ctx-item" id="ctx-queue">+ Add to Queue</div>
+  <div class="ctx-item" id="ctx-playlist">☰ Add to Playlist</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" id="ctx-info">ℹ Track Info</div>
+  <div class="ctx-item danger" id="ctx-remove">✕ Remove from Library</div>
+</div>
+
+<!-- MODAL -->
+<div id="modal-overlay" class="hidden">
+  <div id="modal">
+    <div id="modal-title"></div>
+    <div id="modal-body"></div>
+    <div id="modal-actions">
+      <button class="ghost-btn" id="modal-cancel">Cancel</button>
+      <button class="accent-btn" id="modal-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/utils.js"></script>
+<script src="js/library.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/equalizer.js"></script>
+<script src="js/visualizer.js"></script>
+<script src="js/player.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
