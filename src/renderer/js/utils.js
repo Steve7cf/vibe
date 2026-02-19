@@ -1,106 +1,110 @@
+/* ═══════════════════════════════════════════════════════
+   Utils — shared helpers
+   ═══════════════════════════════════════════════════════ */
 const Utils = {
+
   formatTime(sec) {
-    if (!sec || isNaN(sec) || !isFinite(sec)) return '0:00';
+    if (!sec || !isFinite(sec) || sec < 0) return '0:00';
     sec = Math.floor(sec);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
   },
 
   sanitize(str) {
     if (!str) return '';
-    return String(str).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+    return String(str).replace(/[<>&"']/g, c =>
+      ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c])
+    );
   },
 
-  generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  uid() {
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   },
 
-  debounce(fn, delay) {
+  debounce(fn, ms) {
     let t;
-    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   },
 
-  showToast(msg, duration = 2800) {
-    let container = document.getElementById('toast-container');
-    if (!container) {
-      container = document.createElement('div');
-      container.id = 'toast-container';
-      document.body.appendChild(container);
-    }
-    const toast = document.createElement('div');
-    toast.className = 'toast';
-    toast.textContent = msg;
-    container.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s';
-      setTimeout(() => toast.remove(), 300);
-    }, duration);
+  throttle(fn, ms) {
+    let last = 0;
+    return (...a) => {
+      const now = Date.now();
+      if (now - last >= ms) { last = now; fn(...a); }
+    };
   },
 
-  showModal(title, body, onOk, okLabel = 'OK') {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-body').innerHTML = body;
-    document.getElementById('modal-ok').textContent = okLabel;
-    document.getElementById('modal-overlay').classList.remove('hidden');
-    const close = () => document.getElementById('modal-overlay').classList.add('hidden');
-    document.getElementById('modal-ok').onclick = () => { onOk && onOk(); close(); };
-    document.getElementById('modal-cancel').onclick = close;
-    document.getElementById('modal-overlay').onclick = (e) => { if (e.target.id === 'modal-overlay') close(); };
-    setTimeout(() => document.getElementById('modal-body').querySelector('input')?.focus(), 60);
+  greeting(name) {
+    const h = new Date().getHours();
+    const part = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
+    return `Good ${part}${name ? `, ${name}` : ''}`;
   },
 
-  extensionToFormat(p) {
-    return (p || '').split('.').pop().toUpperCase() || '?';
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  toast(msg, ms = 2800) {
+    let box = document.getElementById('toast-box');
+    const el = Object.assign(document.createElement('div'), {
+      className: 'toast', textContent: msg
+    });
+    box.appendChild(el);
+    setTimeout(() => { el.classList.add('fade-out'); setTimeout(() => el.remove(), 320); }, ms);
   },
 
-  // Extract dominant color from an image data URL using canvas
-  extractColors(dataUrl) {
-    return new Promise((resolve) => {
-      if (!dataUrl) { resolve(null); return; }
+  // ── Modal ──────────────────────────────────────────────────────────────────
+  modal(title, bodyHTML, onOk, okLabel = 'OK', hideCancelBtn = false) {
+    document.getElementById('modal-title').textContent   = title;
+    document.getElementById('modal-body').innerHTML      = bodyHTML;
+    document.getElementById('modal-ok').textContent      = okLabel;
+    const cancelBtn = document.getElementById('modal-cancel');
+    if (cancelBtn) cancelBtn.style.display = hideCancelBtn ? 'none' : '';
+    const overlay = document.getElementById('modal-overlay');
+    overlay.classList.remove('hidden');
+    const close = () => overlay.classList.add('hidden');
+    document.getElementById('modal-ok').onclick     = () => { onOk?.(); close(); };
+    if (cancelBtn) cancelBtn.onclick                = close;
+    overlay.onclick = e => { if (e.target === overlay) close(); };
+    setTimeout(() => overlay.querySelector('input,select')?.focus(), 60);
+  },
+
+  // ── Album art color extraction ─────────────────────────────────────────────
+  async extractColor(dataUrl) {
+    if (!dataUrl) return null;
+    return new Promise(resolve => {
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 64; canvas.height = 64;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, 64, 64);
-        const data = ctx.getImageData(0, 0, 64, 64).data;
-        // Sample pixels, bucket colors
+        const c = Object.assign(document.createElement('canvas'), { width: 40, height: 40 });
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, 40, 40);
+        const px = ctx.getImageData(0, 0, 40, 40).data;
         const buckets = {};
-        for (let i = 0; i < data.length; i += 16) {
-          const r = Math.round(data[i] / 32) * 32;
-          const g = Math.round(data[i+1] / 32) * 32;
-          const b = Math.round(data[i+2] / 32) * 32;
-          const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-          if (brightness < 20 || brightness > 235) continue; // skip near-black/white
-          const key = `${r},${g},${b}`;
-          buckets[key] = (buckets[key] || 0) + 1;
+        for (let i = 0; i < px.length; i += 16) {
+          const lum = (px[i] * 299 + px[i+1] * 587 + px[i+2] * 114) / 1000;
+          if (lum < 28 || lum > 228) continue;
+          const r = Math.round(px[i] / 36) * 36;
+          const g = Math.round(px[i+1] / 36) * 36;
+          const b = Math.round(px[i+2] / 36) * 36;
+          const k = `${r},${g},${b}`;
+          buckets[k] = (buckets[k] || 0) + 1;
         }
-        const sorted = Object.entries(buckets).sort((a, b) => b[1] - a[1]);
-        if (!sorted.length) { resolve(null); return; }
-        const [r, g, b] = sorted[0][0].split(',').map(Number);
-        // Make it more vivid
-        const max = Math.max(r, g, b);
-        const factor = max > 0 ? Math.min(255 / max, 2.5) : 1;
-        const vr = Math.min(255, Math.round(r * factor));
-        const vg = Math.min(255, Math.round(g * factor));
-        const vb = Math.min(255, Math.round(b * factor));
-        resolve({ r: vr, g: vg, b: vb, hex: `#${vr.toString(16).padStart(2,'0')}${vg.toString(16).padStart(2,'0')}${vb.toString(16).padStart(2,'0')}` });
+        const top = Object.entries(buckets).sort((a, b) => b[1] - a[1])[0];
+        if (!top) { resolve(null); return; }
+        let [r, g, b] = top[0].split(',').map(Number);
+        const mx = Math.max(r, g, b);
+        if (mx > 0) { const f = Math.min(255 / mx, 2.0); r = Math.min(255, r*f|0); g = Math.min(255, g*f|0); b = Math.min(255, b*f|0); }
+        resolve(`#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`);
       };
       img.onerror = () => resolve(null);
       img.src = dataUrl;
     });
   },
 
-  applyThemeColor(hex) {
+  applyAccent(hex) {
     if (!hex) return;
     document.documentElement.style.setProperty('--accent', hex);
+    const r = parseInt(hex.slice(1,3), 16);
+    const g = parseInt(hex.slice(3,5), 16);
+    const b = parseInt(hex.slice(5,7), 16);
+    const dim = `#${(r*.72|0).toString(16).padStart(2,'0')}${(g*.72|0).toString(16).padStart(2,'0')}${(b*.72|0).toString(16).padStart(2,'0')}`;
+    document.documentElement.style.setProperty('--accent-dim', dim);
+    document.documentElement.style.setProperty('--accent-rgb', `${r},${g},${b}`);
   },
-
-  restoreThemeColor() {
-    const cfg = App?.config;
-    const color = cfg?.accentColor || '#1db954';
-    document.documentElement.style.setProperty('--accent', color);
-  }
 };

@@ -1,101 +1,148 @@
+/* ══════════════════════════════════════════════════════════════════
+   App — bootstrap, onboarding glue, Today Mix scheduler, session
+   ══════════════════════════════════════════════════════════════════ */
 const App = {
   config: {},
 
   async init() {
     this.config = await window.vibeAPI.getConfig();
     await Library.init();
+    if (!this.config.onboardingDone) { UI._obShow(); return; }
+    await this._boot();
+  },
+
+  async afterOnboarding(prefs) {
+    Object.assign(this.config, prefs, { onboardingDone: true });
+    await window.vibeAPI.saveConfig(this.config);
+    await this._boot();
+  },
+
+  async _boot() {
     AudioEngine.init();
     Player.init();
     Visualizer.init();
     Equalizer.init();
     UI.init();
     this._applyConfig();
-    this._bindGlobalEvents();
+    this._bindGlobal();
     UI.showView('home');
-    UI.renderSidebarPlaylists();
+    UI.renderSidebarPls();
     Visualizer.setMode(this.config.visualizerMode || 'bars');
+    this._scheduleTodayMix();
   },
 
   _applyConfig() {
-    AudioEngine.setVolume(this.config.volume ?? 0.8);
-    AudioEngine.setBalance(this.config.balance ?? 0);
-    AudioEngine.setSpeed(this.config.speed ?? 1);
-    AudioEngine.config.crossfade = this.config.crossfade ?? 3;
-    AudioEngine.config.fadeIn = this.config.fadeIn !== false;
-    AudioEngine.config.fadeOut = this.config.fadeOut !== false;
-    Player.shuffle = this.config.shuffle || false;
-    Player.repeat = this.config.repeat || 'off';
-
+    const c = this.config;
+    AudioEngine.setVolume(c.volume ?? 0.8);
+    AudioEngine.setBalance(c.balance ?? 0);
+    AudioEngine.setSpeed(c.speed ?? 1);
+    AudioEngine.config.crossfade = c.crossfade ?? 3;
+    AudioEngine.config.fadeIn    = c.fadeIn  !== false;
+    AudioEngine.config.fadeOut   = c.fadeOut !== false;
+    Player.shuffle = c.shuffle || false;
+    Player.repeat  = c.repeat  || 'off';
     document.getElementById('btn-shuffle')?.classList.toggle('active', Player.shuffle);
     Player._updateRepeatBtn?.();
-    Equalizer.applyFromConfig(this.config);
-    UI.applySettings(this.config);
+    Equalizer.applyFromConfig(c);
+    UI.applySettings(c);
+    if (c.accentColor) Utils.applyAccent(c.accentColor);
 
-    // Restore last track
-    if (this.config.lastTrackId) {
-      const track = Library.tracks.find(t => t.id === this.config.lastTrackId);
-      if (track) {
-        Player.currentTrack = track;
-        Player.queue = [...Library.tracks];
+    if (c.lastTrackId) {
+      const t = Library.tracks.find(t => t.id === c.lastTrackId);
+      if (t) {
+        Player.currentTrack  = t;
+        Player.queue         = [...Library.tracks];
         Player.originalQueue = [...Library.tracks];
-        Player.currentIndex = Player.queue.findIndex(t => t.id === track.id);
-        AudioEngine.load(track).then(() => {
-          if (this.config.lastPosition > 0) AudioEngine.seekTo(this.config.lastPosition);
+        Player.currentIndex  = Player.queue.findIndex(x => x.id === t.id);
+        AudioEngine.load(t).then(() => {
+          if (c.lastPosition > 0) AudioEngine.seekTo(c.lastPosition);
           Player._updateUI();
         });
       }
     }
   },
 
-  _bindGlobalEvents() {
-    window.vibeAPI.onTrayAction(action => {
-      if (action === 'playpause') Player.toggle();
-      else if (action === 'next') Player.next();
-      else if (action === 'prev') Player.prev();
+  // ── Today Mix daily refresh ─────────────────────────────────────────────────
+  _scheduleTodayMix() {
+    const today = new Date().toDateString();
+    if (this.config.lastMixDate !== today || !this.config.todayMixIds?.length) {
+      this._refreshMix(today);
+    }
+    const msToMidnight = new Date(new Date().setHours(24,0,0,0)) - Date.now();
+    setTimeout(() => { this._refreshMix(new Date().toDateString()); this._scheduleTodayMix(); }, msToMidnight);
+  },
+
+  _refreshMix(dateStr) {
+    const mix = Library.getTodayMix(10);
+    this.config.todayMixIds = mix.map(t => t.id);
+    this.config.lastMixDate = dateStr;
+    this.save();
+  },
+
+  getTodayMixTracks() {
+    if (!this.config.todayMixIds?.length) return Library.getTodayMix(10);
+    const tracks = this.config.todayMixIds
+      .map(id => Library.tracks.find(t => t.id === id)).filter(Boolean);
+    return tracks.length ? tracks : Library.getTodayMix(10);
+  },
+
+  // ── Global keyboard / tray ──────────────────────────────────────────────────
+  _bindGlobal() {
+    window.vibeAPI.onTrayAction(a => {
+      if (a==='playpause') Player.toggle();
+      else if (a==='next') Player.next();
+      else if (a==='prev') Player.prev();
     });
-    window.vibeAPI.onGlobalShortcut(action => {
-      if (action === 'playpause') Player.toggle();
-      else if (action === 'next') Player.next();
-      else if (action === 'prev') Player.prev();
-      else if (action === 'stop') Player.stop();
+    window.vibeAPI.onGlobalShortcut(a => {
+      if (a==='playpause') Player.toggle();
+      else if (a==='next') Player.next();
+      else if (a==='prev') Player.prev();
+      else if (a==='stop') Player.stop();
     });
 
     document.addEventListener('keydown', e => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
-      switch(e.code) {
-        case 'Space': e.preventDefault(); Player.toggle(); break;
-        case 'ArrowRight': if (e.ctrlKey || e.metaKey) Player.next(); else AudioEngine.seekTo(AudioEngine.currentTime + 5); break;
-        case 'ArrowLeft': if (e.ctrlKey || e.metaKey) Player.prev(); else AudioEngine.seekTo(AudioEngine.currentTime - 5); break;
-        case 'ArrowUp': e.preventDefault(); { const v = Math.min(1, AudioEngine.config.volume + 0.05); AudioEngine.setVolume(v); document.getElementById('volume-slider').value = v; UI._updateVolSlider(v); } break;
-        case 'ArrowDown': e.preventDefault(); { const v = Math.max(0, AudioEngine.config.volume - 0.05); AudioEngine.setVolume(v); document.getElementById('volume-slider').value = v; UI._updateVolSlider(v); } break;
-        case 'KeyM': UI._toggleMute(); break;
-        case 'KeyS': if (e.ctrlKey || e.metaKey) { e.preventDefault(); Player.toggleShuffle(); } break;
-        case 'KeyR': if (e.ctrlKey || e.metaKey) { e.preventDefault(); Player.cycleRepeat(); } break;
+      if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      const adjVol = d => {
+        const v = Math.max(0, Math.min(1, AudioEngine.config.volume + d));
+        AudioEngine.setVolume(v);
+        const s = document.getElementById('vol-slider');
+        if (s) { s.value = v; UI._syncVolSlider(v); }
+      };
+      switch (e.code) {
+        case 'Space':      e.preventDefault(); Player.toggle(); break;
+        case 'ArrowRight': e.ctrlKey ? Player.next() : AudioEngine.seekTo(AudioEngine.currentTime + 5); break;
+        case 'ArrowLeft':  e.ctrlKey ? Player.prev() : AudioEngine.seekTo(AudioEngine.currentTime - 5); break;
+        case 'ArrowUp':    e.preventDefault(); adjVol(+0.05); break;
+        case 'ArrowDown':  e.preventDefault(); adjVol(-0.05); break;
+        case 'KeyM':       UI._toggleMute(); break;
+        case 'KeyS':       if (e.ctrlKey) { e.preventDefault(); Player.toggleShuffle(); } break;
+        case 'KeyR':       if (e.ctrlKey) { e.preventDefault(); Player.cycleRepeat();   } break;
       }
     });
 
-    window.addEventListener('beforeunload', () => this._saveSession());
-    setInterval(() => this._saveSession(), 15000);
+    window.addEventListener('beforeunload', () => this._snapshot());
+    setInterval(() => this._snapshot(), 15000);
   },
 
-  _saveSession() {
-    this.config.lastTrackId = Player.currentTrack?.id || null;
+  _snapshot() {
+    this.config.lastTrackId  = Player.currentTrack?.id || null;
     this.config.lastPosition = AudioEngine.currentTime || 0;
-    this.saveSettings();
-  },
-
-  updateConfig(key, value) {
-    this.config[key] = value;
-    this.saveSettings();
-  },
-
-  saveSettings() {
-    this.config.shuffle = Player.shuffle;
-    this.config.repeat = Player.repeat;
-    this.config.volume = AudioEngine.config.volume;
-    this.config.eq = { enabled: Equalizer.enabled, bands: [...Equalizer.bands] };
+    this.config.shuffle      = Player.shuffle;
+    this.config.repeat       = Player.repeat;
+    this.config.volume       = AudioEngine.config.volume;
+    this.config.eq           = { enabled: Equalizer.enabled, bands: [...Equalizer.bands] };
     window.vibeAPI.saveConfig(this.config);
-  }
+  },
+
+  updateConfig(k, v) { this.config[k] = v; this.save(); },
+
+  save() {
+    this.config.shuffle = Player.shuffle;
+    this.config.repeat  = Player.repeat;
+    this.config.volume  = AudioEngine.config.volume;
+    this.config.eq      = { enabled: Equalizer.enabled, bands: [...Equalizer.bands] };
+    window.vibeAPI.saveConfig(this.config);
+  },
 };
 
 document.addEventListener('DOMContentLoaded', () => App.init());

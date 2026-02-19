@@ -1,117 +1,137 @@
+/* ═══════════════════════════════════════════════════════
+   Visualizer — 4 modes, throttled RAF, DPR-aware
+   ═══════════════════════════════════════════════════════ */
 const Visualizer = {
-  canvas: null,
-  ctx: null,
-  mode: 'bars',
-  animId: null,
-  running: false,
+  canvas: null, ctx2d: null,
+  mode: 'bars', animId: null, running: false,
+  _accentCache: '', _accent: '#1db954',
 
   init() {
     this.canvas = document.getElementById('visualizer');
-    this.ctx = this.canvas.getContext('2d');
+    if (!this.canvas) return;
+    this.ctx2d = this.canvas.getContext('2d', { alpha: true });
     this._resize();
-    window.addEventListener('resize', () => this._resize());
+    new ResizeObserver(() => this._resize()).observe(this.canvas.parentElement);
   },
 
   _resize() {
-    const rect = this.canvas.parentElement.getBoundingClientRect();
-    this.canvas.width = rect.width;
-    this.canvas.height = rect.height;
+    const p = this.canvas?.parentElement;
+    if (!p) return;
+    const { width: w, height: h } = p.getBoundingClientRect();
+    const dpr = devicePixelRatio || 1;
+    this.canvas.width  = w * dpr;
+    this.canvas.height = h * dpr;
+    this.canvas.style.width  = w + 'px';
+    this.canvas.style.height = h + 'px';
+    this.ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
   },
 
-  start(mode) {
-    if (mode) this.mode = mode;
-    this.running = true;
-    cancelAnimationFrame(this.animId);
-    this._frame();
+  _getAccent() {
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    if (v !== this._accentCache) { this._accentCache = v; this._accent = v || '#1db954'; }
+    return this._accent;
   },
 
-  stop() {
-    this.running = false;
-    cancelAnimationFrame(this.animId);
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  _parseAccent(hex) {
+    return [
+      parseInt(hex.slice(1,3)||'1d',16),
+      parseInt(hex.slice(3,5)||'b9',16),
+      parseInt(hex.slice(5,7)||'54',16),
+    ];
   },
 
-  setMode(mode) {
-    this.mode = mode;
-    if (mode === 'off') { this.stop(); return; }
-    if (!this.running) this.start(mode);
-  },
+  start(mode) { if (mode) this.mode = mode; this.running = true; cancelAnimationFrame(this.animId); this._frame(); },
+  stop()      { this.running = false; cancelAnimationFrame(this.animId); const r = this.canvas?.getBoundingClientRect(); if (r) this.ctx2d?.clearRect(0,0,r.width,r.height); },
+  setMode(m)  { this.mode = m; if (m === 'off') { this.stop(); return; } if (Player?.isPlaying) this.start(m); },
 
   _frame() {
     if (!this.running) return;
     this.animId = requestAnimationFrame(() => this._frame());
-    const data = AudioEngine.getAnalyserData('frequency');
-    const w = this.canvas.width;
-    const h = this.canvas.height;
-    this.ctx.clearRect(0, 0, w, h);
-
-    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#1db954';
-
-    if (this.mode === 'bars') this._drawBars(data, w, h, accent);
-    else if (this.mode === 'wave') this._drawWave(w, h, accent);
-    else if (this.mode === 'circle') this._drawCircle(data, w, h, accent);
+    const r  = this.canvas.getBoundingClientRect();
+    const w  = r.width, h = r.height;
+    const c  = this.ctx2d;
+    c.clearRect(0, 0, w, h);
+    const acc = this._getAccent();
+    const rgb = this._parseAccent(acc);
+    const freq = AudioEngine.getFrequencyData();
+    const wave = this.mode === 'wave' ? AudioEngine.getWaveformData() : null;
+    if      (this.mode === 'bars')   this._bars(freq, w, h, rgb);
+    else if (this.mode === 'wave')   this._wave(wave, w, h, acc);
+    else if (this.mode === 'circle') this._circle(freq, w, h, rgb);
+    else if (this.mode === 'mirror') this._mirror(freq, w, h, rgb);
   },
 
-  _drawBars(data, w, h, accent) {
-    const bars = 48;
-    const barW = w / bars - 1;
-    const step = Math.floor(data.length / bars);
-    for (let i = 0; i < bars; i++) {
-      let sum = 0;
-      for (let j = 0; j < step; j++) sum += data[i * step + j];
-      const avg = sum / step;
-      const bh = (avg / 255) * h * 0.9;
-      const x = i * (barW + 1);
-      const alpha = 0.4 + (avg / 255) * 0.6;
-      this.ctx.fillStyle = accent;
-      this.ctx.globalAlpha = alpha;
-      this.ctx.fillRect(x, h - bh, barW, bh);
+  _bars(data, w, h, [r,g,b]) {
+    const n = 40, barW = (w / n) - 1.5;
+    const step = Math.floor(data.length / n);
+    for (let i = 0; i < n; i++) {
+      let s = 0; for (let j = 0; j < step; j++) s += data[i*step+j];
+      const avg = s / step, bh = (avg/255)*h*0.88;
+      if (bh < 1) continue;
+      const x = i * (barW + 1.5);
+      const a = 0.32 + (avg/255)*0.68;
+      const gr = this.ctx2d.createLinearGradient(0, h-bh, 0, h);
+      gr.addColorStop(0, `rgba(${r},${g},${b},${a})`);
+      gr.addColorStop(1, `rgba(${r},${g},${b},0.08)`);
+      this.ctx2d.fillStyle = gr;
+      this.ctx2d.beginPath();
+      this.ctx2d.roundRect(x, h-bh, barW, bh, [3,3,0,0]);
+      this.ctx2d.fill();
     }
-    this.ctx.globalAlpha = 1;
   },
 
-  _drawWave(w, h, accent) {
-    const data = AudioEngine.getAnalyserData('waveform');
-    this.ctx.beginPath();
-    this.ctx.strokeStyle = accent;
-    this.ctx.lineWidth = 2;
-    this.ctx.globalAlpha = 0.7;
+  _wave(data, w, h, acc) {
+    const c = this.ctx2d;
+    c.beginPath();
+    c.strokeStyle = acc;
+    c.lineWidth   = 2.5;
+    c.shadowColor = acc; c.shadowBlur = 8;
     const slice = w / data.length;
-    let x = 0;
     for (let i = 0; i < data.length; i++) {
-      const v = data[i] / 128.0;
-      const y = (v * h) / 2;
-      if (i === 0) this.ctx.moveTo(x, y);
-      else this.ctx.lineTo(x, y);
-      x += slice;
+      const y = ((data[i]/128) - 1) * (h*0.42) + h/2;
+      i === 0 ? c.moveTo(0, y) : c.lineTo(i*slice, y);
     }
-    this.ctx.stroke();
-    this.ctx.globalAlpha = 1;
+    c.globalAlpha = 0.78; c.stroke();
+    c.globalAlpha = 1; c.shadowBlur = 0;
   },
 
-  _drawCircle(data, w, h, accent) {
-    const cx = w / 2, cy = h / 2;
-    const radius = Math.min(w, h) * 0.25;
-    const bars = 64;
-    const step = Math.floor(data.length / bars);
-    for (let i = 0; i < bars; i++) {
-      let sum = 0;
-      for (let j = 0; j < step; j++) sum += data[i * step + j];
-      const avg = sum / step;
-      const angle = (i / bars) * Math.PI * 2 - Math.PI / 2;
-      const len = (avg / 255) * radius * 0.8;
-      const x1 = cx + Math.cos(angle) * radius;
-      const y1 = cy + Math.sin(angle) * radius;
-      const x2 = cx + Math.cos(angle) * (radius + len);
-      const y2 = cy + Math.sin(angle) * (radius + len);
-      this.ctx.beginPath();
-      this.ctx.strokeStyle = accent;
-      this.ctx.lineWidth = 2;
-      this.ctx.globalAlpha = 0.5 + (avg / 255) * 0.5;
-      this.ctx.moveTo(x1, y1);
-      this.ctx.lineTo(x2, y2);
-      this.ctx.stroke();
+  _circle(data, w, h, [r,g,b]) {
+    const cx = w/2, cy = h/2, baseR = Math.min(w,h)*0.22;
+    const n = 60, step = Math.floor(data.length / n);
+    for (let i = 0; i < n; i++) {
+      let s = 0; for (let j = 0; j < step; j++) s += data[i*step+j];
+      const avg = s/step, len = (avg/255)*baseR;
+      const angle = (i/n)*Math.PI*2 - Math.PI/2;
+      const a = 0.35 + (avg/255)*0.65;
+      this.ctx2d.beginPath();
+      this.ctx2d.strokeStyle = `rgba(${r},${g},${b},${a})`;
+      this.ctx2d.lineWidth = 2;
+      this.ctx2d.moveTo(cx + Math.cos(angle)*baseR, cy + Math.sin(angle)*baseR);
+      this.ctx2d.lineTo(cx + Math.cos(angle)*(baseR+len), cy + Math.sin(angle)*(baseR+len));
+      this.ctx2d.stroke();
     }
-    this.ctx.globalAlpha = 1;
-  }
+    // centre glow
+    const grd = this.ctx2d.createRadialGradient(cx,cy,0,cx,cy,baseR*0.5);
+    grd.addColorStop(0, `rgba(${r},${g},${b},0.10)`);
+    grd.addColorStop(1, 'transparent');
+    this.ctx2d.fillStyle = grd;
+    this.ctx2d.beginPath(); this.ctx2d.arc(cx,cy,baseR*0.5,0,Math.PI*2); this.ctx2d.fill();
+  },
+
+  _mirror(data, w, h, [r,g,b]) {
+    const n = 50, barW = (w/n) - 1, mid = h/2;
+    const step = Math.floor(data.length / n);
+    for (let i = 0; i < n; i++) {
+      let s = 0; for (let j = 0; j < step; j++) s += data[i*step+j];
+      const avg = s/step, bh = (avg/255)*mid*0.88;
+      if (bh < 1) continue;
+      const x = i*(barW+1), a = 0.28 + (avg/255)*0.72;
+      const gr = this.ctx2d.createLinearGradient(0,mid-bh,0,mid+bh);
+      gr.addColorStop(0,   `rgba(${r},${g},${b},0.04)`);
+      gr.addColorStop(0.5, `rgba(${r},${g},${b},${a})`);
+      gr.addColorStop(1,   `rgba(${r},${g},${b},0.04)`);
+      this.ctx2d.fillStyle = gr;
+      this.ctx2d.beginPath(); this.ctx2d.roundRect(x,mid-bh,barW,bh*2,[2]); this.ctx2d.fill();
+    }
+  },
 };

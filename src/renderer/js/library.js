@@ -1,184 +1,264 @@
+/* ═══════════════════════════════════════════════════════
+   Library — tracks, playlists, play stats, Today Mix
+   ═══════════════════════════════════════════════════════ */
 const Library = {
   tracks: [],
   playlists: [],
   recentIds: [],
   likedIds: new Set(),
-  playCount: {},       // trackId -> number
-  lastPlayedAt: {},    // trackId -> timestamp
+  playCount: {},
+  lastPlayedAt: {},
 
   async init() {
-    const data = await window.vibeAPI.getLibrary();
-    this.tracks = data.tracks || [];
-    this.playlists = data.playlists || [];
-    this.recentIds = data.recentIds || [];
-    this.likedIds = new Set(data.likedIds || []);
-    this.playCount = data.playCount || {};
-    this.lastPlayedAt = data.lastPlayedAt || {};
+    const d = await window.vibeAPI.getLibrary();
+    this.tracks       = d.tracks       || [];
+    this.playlists    = d.playlists    || [];
+    this.recentIds    = d.recentIds    || [];
+    this.likedIds     = new Set(d.likedIds || []);
+    this.playCount    = d.playCount    || {};
+    this.lastPlayedAt = d.lastPlayedAt || {};
   },
 
-  async save() {
-    await window.vibeAPI.saveLibrary({
-      tracks: this.tracks,
-      playlists: this.playlists,
-      recentIds: this.recentIds,
-      likedIds: [...this.likedIds],
-      playCount: this.playCount,
-      lastPlayedAt: this.lastPlayedAt
-    });
+  _saveTimer: null,
+  save() {
+    clearTimeout(this._saveTimer);
+    this._saveTimer = setTimeout(() => {
+      window.vibeAPI.saveLibrary({
+        tracks:       this.tracks,
+        playlists:    this.playlists,
+        recentIds:    this.recentIds,
+        likedIds:     [...this.likedIds],
+        playCount:    this.playCount,
+        lastPlayedAt: this.lastPlayedAt,
+      });
+    }, 800);
   },
 
+  // ── Add / scan ─────────────────────────────────────────────────────────────
   async addFiles(paths) {
-    const newTracks = [];
+    const added = [];
     for (const p of paths) {
       if (this.tracks.find(t => t.path === p)) continue;
       try {
         const meta = await window.vibeAPI.readMetadata(p);
-        meta.id = Utils.generateId();
+        meta.id      = Utils.uid();
         meta.addedAt = Date.now();
         this.tracks.push(meta);
-        newTracks.push(meta);
-      } catch(e) { console.warn('metadata fail', p, e); }
+        added.push(meta);
+      } catch(e) { console.warn('[Library] meta fail', p); }
     }
-    if (newTracks.length) await this.save();
-    return newTracks;
+    if (added.length) this.save();
+    return added;
   },
 
-  async scanFolder(folderPath) {
-    const files = await window.vibeAPI.scanFolder(folderPath);
-    return await this.addFiles(files);
+  async scanFolder(folder) {
+    const files = await window.vibeAPI.scanFolder(folder);
+    return this.addFiles(files);
   },
 
   removeTrack(id) {
-    this.tracks = this.tracks.filter(t => t.id !== id);
-    this.playlists.forEach(pl => { pl.tracks = pl.tracks.filter(tid => tid !== id); });
-    this.recentIds = this.recentIds.filter(rid => rid !== id);
+    this.tracks    = this.tracks.filter(t => t.id !== id);
+    this.playlists.forEach(pl => { pl.tracks = pl.tracks.filter(i => i !== id); });
+    this.recentIds = this.recentIds.filter(i => i !== id);
     delete this.playCount[id];
     delete this.lastPlayedAt[id];
     this.save();
   },
 
-  search(query) {
-    if (!query) return this.tracks;
-    const q = query.toLowerCase();
+  search(q) {
+    if (!q) return this.tracks;
+    const s = q.toLowerCase();
     return this.tracks.filter(t =>
-      (t.title||'').toLowerCase().includes(q) ||
-      (t.artist||'').toLowerCase().includes(q) ||
-      (t.album||'').toLowerCase().includes(q) ||
-      (t.genre||'').toLowerCase().includes(q)
+      (t.title  || '').toLowerCase().includes(s) ||
+      (t.artist || '').toLowerCase().includes(s) ||
+      (t.album  || '').toLowerCase().includes(s) ||
+      (t.genre  || '').toLowerCase().includes(s)
     );
   },
 
+  // ── Play tracking ──────────────────────────────────────────────────────────
+  recordPlay(id) {
+    this.playCount[id]    = (this.playCount[id] || 0) + 1;
+    this.lastPlayedAt[id] = Date.now();
+    this.recentIds = [id, ...this.recentIds.filter(i => i !== id)].slice(0, 80);
+    this.save();
+  },
+
+  toggleLike(id) {
+    this.likedIds.has(id) ? this.likedIds.delete(id) : this.likedIds.add(id);
+    this.save();
+    return this.likedIds.has(id);
+  },
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+  getRecentlyPlayed(n = 12) {
+    return this.recentIds.slice(0, n)
+      .map(id => this.tracks.find(t => t.id === id)).filter(Boolean);
+  },
+
+  getRecentlyAdded(n = 12) {
+    return [...this.tracks]
+      .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+      .slice(0, n);
+  },
+
+  getMostPlayed(n = 12) {
+    return [...this.tracks]
+      .filter(t => (this.playCount[t.id] || 0) > 0)
+      .sort((a, b) => (this.playCount[b.id] || 0) - (this.playCount[a.id] || 0))
+      .slice(0, n);
+  },
+
+  getLiked() {
+    return this.tracks.filter(t => this.likedIds.has(t.id));
+  },
+
+  // ── Today Mix ─────────────────────────────────────────────────────────────
+  // Smart daily playlist: recency + frequency + liked + time-of-day mood + genre variety
+  getTodayMix(count = 10) {
+    if (!this.tracks.length) return [];
+    if (this.tracks.length <= count) return this._shuffled([...this.tracks]);
+
+    const now  = Date.now();
+    const hour = new Date().getHours();
+
+    // Mood genre preferences by time of day
+    const moodGenres = hour < 10
+      ? ['acoustic', 'folk', 'jazz', 'classical', 'ambient', 'indie']
+      : hour < 18
+        ? ['pop', 'rock', 'hip hop', 'electronic', 'r&b', 'dance', 'funk']
+        : ['r&b', 'soul', 'jazz', 'lo-fi', 'indie', 'alternative', 'chill'];
+
+    const scored = this.tracks.map(t => {
+      let score = Math.random() * 28;   // controlled randomness
+
+      const days = (now - (this.lastPlayedAt[t.id] || 0)) / 86400000;
+      if      (days < 0.1) score -= 55; // played very recently — suppress
+      else if (days < 1)   score += 35; // played today (not last hour)
+      else if (days < 7)   score += 18; // this week
+      else if (days < 30)  score += 6;  // this month
+      else                 score -= 4;  // stale
+
+      // Popularity
+      score += Math.min((this.playCount[t.id] || 0) * 3, 28);
+
+      // Liked
+      if (this.likedIds.has(t.id)) score += 22;
+
+      // Mood match
+      const g = (t.genre || '').toLowerCase();
+      if (moodGenres.some(m => g.includes(m))) score += 18;
+
+      return { track: t, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+
+    // Genre variety: max 3 per genre from top-30 pool
+    const pool = scored.slice(0, Math.min(30, scored.length));
+    const mix = [];
+    const usedGenres = {};
+
+    for (const { track: t } of pool) {
+      if (mix.length >= count) break;
+      const g = (t.genre || 'unknown').toLowerCase();
+      if ((usedGenres[g] || 0) >= 3) continue;
+      usedGenres[g] = (usedGenres[g] || 0) + 1;
+      mix.push(t);
+    }
+    // Fill gaps
+    for (const { track: t } of pool) {
+      if (mix.length >= count) break;
+      if (!mix.includes(t)) mix.push(t);
+    }
+
+    return this._shuffled(mix);
+  },
+
+  _shuffled(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  },
+
+  // ── Grouping ───────────────────────────────────────────────────────────────
   getByArtist() {
     const map = {};
     this.tracks.forEach(t => {
-      const a = t.artist || 'Unknown Artist';
-      if (!map[a]) map[a] = { name: a, tracks: [], artwork: t.artwork };
-      map[a].tracks.push(t);
-      if (!map[a].artwork && t.artwork) map[a].artwork = t.artwork;
+      const k = t.artist || 'Unknown Artist';
+      if (!map[k]) map[k] = { name: k, tracks: [], artwork: null };
+      map[k].tracks.push(t);
+      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
     });
-    return Object.values(map).sort((a,b) => a.name.localeCompare(b.name));
+    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
   },
 
   getByAlbum() {
     const map = {};
     this.tracks.forEach(t => {
-      const key = `${t.album||'Unknown'}__${t.artist||'Unknown'}`;
-      if (!map[key]) map[key] = { name: t.album||'Unknown Album', artist: t.artist||'Unknown Artist', tracks: [], artwork: t.artwork };
-      map[key].tracks.push(t);
-      if (!map[key].artwork && t.artwork) map[key].artwork = t.artwork;
+      const k = `${t.album || '?'}__${t.artist || '?'}`;
+      if (!map[k]) map[k] = { name: t.album || 'Unknown Album', artist: t.artist || 'Unknown Artist', tracks: [], artwork: null };
+      map[k].tracks.push(t);
+      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
     });
-    return Object.values(map).sort((a,b) => a.name.localeCompare(b.name));
+    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
   },
 
   getByGenre() {
     const map = {};
     this.tracks.forEach(t => {
-      const g = t.genre || 'Unknown';
-      if (!map[g]) map[g] = { name: g, tracks: [], artwork: t.artwork };
-      map[g].tracks.push(t);
-      if (!map[g].artwork && t.artwork) map[g].artwork = t.artwork;
+      const k = t.genre || 'Unknown';
+      if (!map[k]) map[k] = { name: k, tracks: [], artwork: null };
+      map[k].tracks.push(t);
+      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
     });
-    return Object.values(map).sort((a,b) => a.name.localeCompare(b.name));
+    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
   },
 
-  // Recently added (by addedAt timestamp)
-  getRecentlyAdded(limit = 20) {
-    return [...this.tracks]
-      .filter(t => t.addedAt)
-      .sort((a, b) => (b.addedAt||0) - (a.addedAt||0))
-      .slice(0, limit);
-  },
-
-  // Recently played (by lastPlayedAt)
-  getRecentlyPlayed(limit = 20) {
-    return this.recentIds
-      .map(id => this.tracks.find(t => t.id === id))
-      .filter(Boolean)
-      .slice(0, limit);
-  },
-
-  // Most played by play count
-  getMostPlayed(limit = 20) {
-    return [...this.tracks]
-      .filter(t => (this.playCount[t.id] || 0) > 0)
-      .sort((a, b) => (this.playCount[b.id]||0) - (this.playCount[a.id]||0))
-      .slice(0, limit);
-  },
-
-  recordPlay(trackId) {
-    this.playCount[trackId] = (this.playCount[trackId] || 0) + 1;
-    this.lastPlayedAt[trackId] = Date.now();
-    this.recentIds = [trackId, ...this.recentIds.filter(id => id !== trackId)].slice(0, 50);
-    this.save();
-  },
-
+  // ── Playlists ──────────────────────────────────────────────────────────────
   createPlaylist(name) {
-    const pl = { id: Utils.generateId(), name, tracks: [], created: Date.now() };
+    const pl = { id: Utils.uid(), name, tracks: [], created: Date.now() };
     this.playlists.push(pl);
     this.save();
     return pl;
   },
 
-  addToPlaylist(playlistId, trackId) {
-    const pl = this.playlists.find(p => p.id === playlistId);
+  addToPlaylist(plId, trackId) {
+    const pl = this.playlists.find(p => p.id === plId);
     if (pl && !pl.tracks.includes(trackId)) { pl.tracks.push(trackId); this.save(); }
   },
 
-  removeFromPlaylist(playlistId, trackId) {
-    const pl = this.playlists.find(p => p.id === playlistId);
-    if (pl) { pl.tracks = pl.tracks.filter(id => id !== trackId); this.save(); }
+  removeFromPlaylist(plId, trackId) {
+    const pl = this.playlists.find(p => p.id === plId);
+    if (pl) { pl.tracks = pl.tracks.filter(i => i !== trackId); this.save(); }
   },
 
-  deletePlaylist(id) { this.playlists = this.playlists.filter(p => p.id !== id); this.save(); },
-
-  getPlaylistTracks(playlistId) {
-    const pl = this.playlists.find(p => p.id === playlistId);
-    if (!pl) return [];
-    return pl.tracks.map(id => this.tracks.find(t => t.id === id)).filter(Boolean);
-  },
-
-  toggleLike(trackId) {
-    if (this.likedIds.has(trackId)) this.likedIds.delete(trackId);
-    else this.likedIds.add(trackId);
+  deletePlaylist(id) {
+    this.playlists = this.playlists.filter(p => p.id !== id);
     this.save();
-    return this.likedIds.has(trackId);
   },
 
-  async exportPlaylist(playlistId) {
-    const pl = this.playlists.find(p => p.id === playlistId);
+  getPlaylistTracks(id) {
+    const pl = this.playlists.find(p => p.id === id);
+    return pl ? pl.tracks.map(id => this.tracks.find(t => t.id === id)).filter(Boolean) : [];
+  },
+
+  async exportPlaylist(id) {
+    const pl = this.playlists.find(p => p.id === id);
     if (!pl) return;
-    const tracks = this.getPlaylistTracks(playlistId);
-    await window.vibeAPI.exportPlaylist({ name: pl.name, tracks });
-    Utils.showToast('Playlist exported');
+    await window.vibeAPI.exportPlaylist({ name: pl.name, tracks: this.getPlaylistTracks(id) });
+    Utils.toast('Playlist exported');
   },
 
   async importPlaylist() {
     const paths = await window.vibeAPI.importPlaylist();
-    if (!paths.length) return null;
-    const pl = this.createPlaylist('Imported Playlist');
+    if (!paths?.length) return null;
+    const pl    = this.createPlaylist('Imported Playlist');
     const added = await this.addFiles(paths);
     added.forEach(t => pl.tracks.push(t.id));
-    await this.save();
+    this.save();
     return pl;
-  }
+  },
 };

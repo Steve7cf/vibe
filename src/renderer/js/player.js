@@ -1,111 +1,147 @@
+/* ══════════════════════════════════════════════════════════════════
+   Player — queue, gapless preload, album color theming
+   ══════════════════════════════════════════════════════════════════ */
 const Player = {
   currentTrack: null,
   currentIndex: -1,
   queue: [],
   originalQueue: [],
   shuffle: false,
-  repeat: 'off',
+  repeat: 'off',      // 'off' | 'all' | 'one'
   isPlaying: false,
-  sleepTimer: null,
   isDraggingSeek: false,
-  _nextQueue: [],   // "play next" items inserted at front
+  _sleepTimer: null,
+  _tickLast: 0,
 
   init() {
     AudioEngine
-      .on('ended', () => this._onEnded())
-      .on('timeupdate', () => this._onTimeUpdate())
-      .on('loadedmetadata', () => this._onMetadata())
-      .on('error', () => this._onError());
+      .on('ended',          () => this._onEnded())
+      .on('timeupdate',     () => this._onTick())
+      .on('loadedmetadata', () => this._onMeta())
+      .on('error',          () => this._onError());
   },
 
-  setQueue(tracks, startIndex = 0) {
-    this._nextQueue = [];
-    this.queue = [...tracks];
+  // ── Queue ───────────────────────────────────────────────────────────────────
+  setQueue(tracks, startAt = 0) {
+    this.queue         = [...tracks];
     this.originalQueue = [...tracks];
-    this.currentIndex = startIndex;
-    if (this.shuffle) this._shuffleQueue(startIndex);
-    this.playAt(this.currentIndex);
+    if (this.shuffle) { this._doShuffle(startAt); startAt = 0; }
+    this._play(startAt);
   },
 
-  async playAt(index) {
-    if (index < 0 || index >= this.queue.length) return;
-    this.currentIndex = index;
-    this.currentTrack = this.queue[index];
+  async _play(idx) {
+    if (idx < 0 || idx >= this.queue.length) return;
+    this.currentIndex = idx;
+    this.currentTrack = this.queue[idx];
     await AudioEngine.load(this.currentTrack);
     await AudioEngine.play();
     this.isPlaying = true;
     Library.recordPlay(this.currentTrack.id);
+    const next = this.queue[idx + 1];
+    if (next) AudioEngine.preloadNext(next);
     this._updateUI();
+    this._applyAlbumColor();
+    UI.highlightActive();
+    UI.syncNowPlaying();
     if (App.config.notifications) window.vibeAPI.notifyTrack(this.currentTrack);
-    if (App.config.useAlbumColors && this.currentTrack.artwork) {
-      Utils.extractColors(this.currentTrack.artwork).then(color => {
-        if (color) Utils.applyThemeColor(color.hex);
-        else Utils.restoreThemeColor();
-      });
-    }
-    UI.renderHome();
-    UI.highlightActiveTrack();
   },
 
-  async play() {
-    if (!this.currentTrack && this.queue.length) { await this.playAt(0); return; }
-    await AudioEngine.play();
-    this.isPlaying = true;
-    this._updateUI();
-  },
-
-  pause() { AudioEngine.pause(); this.isPlaying = false; this._updateUI(); },
-
-  toggle() { if (this.isPlaying) this.pause(); else this.play(); },
-
-  stop() { AudioEngine.stop(); this.isPlaying = false; this._updateUI(); },
+  play()    { if (!this.currentTrack && this.queue.length) { this._play(0); return; } AudioEngine.play().then(() => { this.isPlaying = true; this._updateUI(); }); },
+  pause()   { AudioEngine.pause(); this.isPlaying = false; this._updateUI(); },
+  toggle()  { this.isPlaying ? this.pause() : this.play(); },
+  stop()    { AudioEngine.stop(); this.isPlaying = false; this._updateUI(); },
+  playAt(i) { this._play(i); },
 
   async next() {
-    if (this.repeat === 'one') { await this.playAt(this.currentIndex); return; }
-    const next = this.currentIndex + 1;
-    if (next >= this.queue.length) {
-      if (this.repeat === 'all') await this.playAt(0);
-      else { this.stop(); }
-    } else {
-      await this.playAt(next);
-    }
+    if (this.repeat === 'one') { await this._play(this.currentIndex); return; }
+    const n = this.currentIndex + 1;
+    n >= this.queue.length ? (this.repeat === 'all' ? this._play(0) : this.stop()) : this._play(n);
   },
 
-  async prev() {
+  prev() {
     if (AudioEngine.currentTime > 3) { AudioEngine.seekTo(0); return; }
-    const prev = this.currentIndex - 1;
-    if (prev < 0) {
-      if (this.repeat === 'all') await this.playAt(this.queue.length - 1);
-      else AudioEngine.seekTo(0);
-    } else {
-      await this.playAt(prev);
-    }
+    const p = this.currentIndex - 1;
+    p < 0 ? (this.repeat === 'all' ? this._play(this.queue.length - 1) : AudioEngine.seekTo(0)) : this._play(p);
+  },
+
+  addToQueue(track) {
+    this.queue.push(track); this.originalQueue.push(track);
+    if (!this.currentTrack) this._play(0);
+    UI.renderQueue();
+    Utils.toast(`Queued "${track.title || '?'}"`);
+  },
+
+  playNext(track) {
+    this.queue.splice(this.currentIndex + 1, 0, track);
+    this.originalQueue.push(track);
+    UI.renderQueue();
+    Utils.toast(`"${track.title || '?'}" plays next`);
+  },
+
+  addTracksToQueue(tracks, autoPlay) {
+    const si = this.queue.length;
+    tracks.forEach(t => { this.queue.push(t); this.originalQueue.push(t); });
+    if (autoPlay && !this.currentTrack) this._play(si);
+    UI.renderQueue();
+  },
+
+  removeFromQueue(i) {
+    if (i === this.currentIndex) return;
+    if (i < this.currentIndex) this.currentIndex--;
+    this.queue.splice(i, 1);
+    UI.renderQueue();
+  },
+
+  clearQueue() {
+    this.stop();
+    this.queue = []; this.originalQueue = [];
+    this.currentIndex = -1; this.currentTrack = null;
+    this._updateUI(); UI.renderQueue();
   },
 
   toggleShuffle() {
     this.shuffle = !this.shuffle;
-    if (this.shuffle) {
-      this._shuffleQueue(this.currentIndex);
-    } else {
+    if (this.shuffle) { this._doShuffle(this.currentIndex); }
+    else {
       const cur = this.currentTrack;
       this.queue = [...this.originalQueue];
       this.currentIndex = cur ? this.queue.findIndex(t => t.id === cur.id) : 0;
     }
     document.getElementById('btn-shuffle')?.classList.toggle('active', this.shuffle);
-    UI.renderQueue();
-    App.saveSettings();
+    UI.renderQueue(); App.save();
   },
 
   cycleRepeat() {
-    const modes = ['off','all','one'];
-    this.repeat = modes[(modes.indexOf(this.repeat) + 1) % modes.length];
-    this._updateRepeatBtn();
-    App.saveSettings();
+    this.repeat = { off: 'all', all: 'one', one: 'off' }[this.repeat];
+    this._updateRepeatBtn(); App.save();
   },
 
-  _shuffleQueue(keepIndex) {
-    const cur = this.queue[keepIndex];
-    let rest = this.queue.filter((_, i) => i !== keepIndex);
+  shuffleAll() {
+    if (!Library.tracks.length) { Utils.toast('No tracks in library'); return; }
+    this.shuffle = true;
+    document.getElementById('btn-shuffle')?.classList.add('active');
+    this.setQueue([...Library.tracks], Math.floor(Math.random() * Library.tracks.length));
+    Utils.toast(`Shuffling ${Library.tracks.length} tracks`);
+  },
+
+  playTodayMix() {
+    const mix = App.getTodayMixTracks();
+    if (!mix.length) { Utils.toast('Add some music first'); return; }
+    this.setQueue(mix, 0);
+    Utils.toast('▶ Today Mix playing');
+  },
+
+  setSleepTimer(mins) {
+    clearTimeout(this._sleepTimer);
+    if (mins > 0) {
+      this._sleepTimer = setTimeout(() => { this.pause(); Utils.toast('Sleep timer — paused ✓'); }, mins * 60000);
+      Utils.toast(`Sleep in ${mins} min`);
+    }
+  },
+
+  _doShuffle(keepIdx) {
+    const cur  = this.queue[keepIdx];
+    const rest = this.queue.filter((_, i) => i !== keepIdx);
     for (let i = rest.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [rest[i], rest[j]] = [rest[j], rest[i]];
@@ -114,156 +150,100 @@ const Player = {
     this.currentIndex = 0;
   },
 
-  addToQueue(track) {
-    this.queue.push(track);
-    this.originalQueue.push(track);
-    if (!this.currentTrack && this.queue.length === 1) this.playAt(0);
-    UI.renderQueue();
-    Utils.showToast(`Added "${track.title}" to queue`);
-  },
-
-  playNext(track) {
-    // Insert right after current position
-    const insertAt = this.currentIndex + 1;
-    this.queue.splice(insertAt, 0, track);
-    this.originalQueue.push(track);
-    UI.renderQueue();
-    Utils.showToast(`"${track.title}" will play next`);
-  },
-
-  addTracksToQueue(tracks, playFirst = false) {
-    const wasEmpty = this.queue.length === 0;
-    tracks.forEach(t => { this.queue.push(t); this.originalQueue.push(t); });
-    if (wasEmpty && tracks.length > 0) this.playAt(0);
-    else if (playFirst && tracks.length > 0) {
-      const idx = this.queue.length - tracks.length;
-      this.playAt(idx);
+  async _applyAlbumColor() {
+    if (!App.config.useAlbumColors || !this.currentTrack?.artwork) {
+      Utils.applyAccent(App.config.accentColor || '#1db954'); return;
     }
-    UI.renderQueue();
-  },
-
-  removeFromQueue(index) {
-    if (index === this.currentIndex) return;
-    if (index < this.currentIndex) this.currentIndex--;
-    this.queue.splice(index, 1);
-    UI.renderQueue();
-  },
-
-  clearQueue() {
-    this.stop();
-    this.queue = []; this.originalQueue = [];
-    this.currentIndex = -1; this.currentTrack = null;
-    UI.renderQueue();
-    this._updateUI();
-  },
-
-  setSleepTimer(minutes) {
-    clearTimeout(this.sleepTimer);
-    if (minutes > 0) {
-      this.sleepTimer = setTimeout(() => { this.pause(); Utils.showToast('Sleep timer: stopped'); }, minutes * 60000);
-      Utils.showToast(`Sleep timer: ${minutes} min`);
-    }
-  },
-
-  shuffleAll() {
-    if (!Library.tracks.length) { Utils.showToast('No tracks in library'); return; }
-    const shuffled = [...Library.tracks];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    this.shuffle = true;
-    document.getElementById('btn-shuffle')?.classList.add('active');
-    this.queue = shuffled; this.originalQueue = [...shuffled];
-    this.currentIndex = 0;
-    this.playAt(0);
-    UI.renderQueue();
-    Utils.showToast(`Shuffling ${shuffled.length} tracks`);
+    const hex = await Utils.extractColor(this.currentTrack.artwork);
+    Utils.applyAccent(hex || App.config.accentColor || '#1db954');
   },
 
   _onEnded() { this.next(); },
+  _onError() { console.warn('[Player] error on', this.currentTrack?.path); setTimeout(() => this.next(), 900); },
 
-  _onTimeUpdate() {
+  _onMeta() {
+    const d = Utils.formatTime(AudioEngine.duration);
+    const a = document.getElementById('time-tot'); if (a) a.textContent = d;
+    const b = document.getElementById('np-dur');    if (b) b.textContent = d;
+  },
+
+  // Throttled tick — 250ms max update rate keeps CPU idle when nothing changes
+  _onTick() {
+    const now = Date.now();
+    if (now - this._tickLast < 250) return;
+    this._tickLast = now;
     if (this.isDraggingSeek) return;
-    const cur = AudioEngine.currentTime;
-    const dur = AudioEngine.duration || 0;
+    const cur = AudioEngine.currentTime, dur = AudioEngine.duration || 0;
     const pct = dur > 0 ? cur / dur : 0;
-    const fill = document.getElementById('seek-fill');
-    const thumb = document.getElementById('seek-thumb');
-    if (fill) fill.style.width = `${pct * 100}%`;
-    if (thumb) thumb.style.right = `calc(100% - ${pct * 100}%)`;
-    const tc = document.getElementById('time-current');
-    if (tc) tc.textContent = Utils.formatTime(cur);
-  },
-
-  _onMetadata() {
-    const tt = document.getElementById('time-total');
-    if (tt) tt.textContent = Utils.formatTime(AudioEngine.duration);
-  },
-
-  _onError() {
-    console.warn('Audio error on:', this.currentTrack?.path);
-    Utils.showToast('Cannot play track — skipping');
-    setTimeout(() => this.next(), 800);
+    const w   = `${pct * 100}%`;
+    const sf = document.getElementById('seek-fill'); if (sf) sf.style.width = w;
+    const tc = document.getElementById('time-cur'); if (tc) tc.textContent = Utils.formatTime(cur);
+    if (!document.getElementById('now-playing').classList.contains('hidden')) {
+      const nf = document.getElementById('np-seek-fill'); if (nf) nf.style.width = w;
+      const nc = document.getElementById('np-cur'); if (nc) nc.textContent = Utils.formatTime(cur);
+    }
+    const next = this.queue[this.currentIndex + 1];
+    if (next && dur > 0 && (dur - cur) < 20) AudioEngine.preloadNext(next);
   },
 
   _updateRepeatBtn() {
-    const btn = document.getElementById('btn-repeat');
-    if (!btn) return;
+    const btn = document.getElementById('btn-repeat'); if (!btn) return;
     btn.classList.toggle('active', this.repeat !== 'off');
-    btn.title = this.repeat === 'one' ? 'Repeat One' : this.repeat === 'all' ? 'Repeat All' : 'Repeat Off';
-    const icon = this.repeat === 'one'
-      ? `<svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg><span class="repeat-one-badge">1</span>`
-      : `<svg viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`;
-    btn.innerHTML = icon;
+    btn.querySelector('.r1-badge')?.remove();
+    if (this.repeat === 'one') {
+      const b = Object.assign(document.createElement('span'), { className: 'r1-badge', textContent: '1' });
+      btn.appendChild(b);
+    }
   },
 
   _updateUI() {
-    const playing = this.isPlaying;
-    document.getElementById('play-icon')?.classList.toggle('hidden', playing);
-    document.getElementById('pause-icon')?.classList.toggle('hidden', !playing);
+    const t = this.currentTrack, on = this.isPlaying;
+    document.getElementById('play-icon')?.classList.toggle('hidden', on);
+    document.getElementById('pause-icon')?.classList.toggle('hidden', !on);
+    document.getElementById('np-play-icon')?.classList.toggle('hidden', on);
+    document.getElementById('np-pause-icon')?.classList.toggle('hidden', !on);
 
-    if (this.currentTrack) {
-      const t = this.currentTrack;
-      const title = t.title || 'Unknown Title';
-      const artist = t.artist || 'Unknown Artist';
-
-      document.getElementById('player-title').textContent = title;
-      document.getElementById('player-artist').textContent = artist;
-
-      const art = document.getElementById('player-art');
-      if (art) {
-        art.innerHTML = t.artwork
-          ? `<img src="${t.artwork}" alt="art">`
-          : `<div class="art-placeholder-inner"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
-      }
-
-      document.getElementById('side-title').textContent = title;
-      document.getElementById('side-artist').textContent = artist;
-      document.getElementById('side-album').textContent = t.album || '';
-
-      const sideArt = document.getElementById('side-art-img');
-      if (sideArt) {
-        sideArt.innerHTML = t.artwork ? `<img src="${t.artwork}" alt="art">` : '';
-      }
-      const placeholder = document.querySelector('.artwork-placeholder');
-      if (placeholder) placeholder.style.display = t.artwork ? 'none' : 'flex';
-
-      const likeBtn = document.getElementById('btn-like');
-      if (likeBtn) {
-        const liked = Library.likedIds.has(t.id);
-        likeBtn.classList.toggle('liked', liked);
-        likeBtn.textContent = liked ? '♥' : '♡';
-      }
-
-      document.title = `${title} — Vibe`;
-      if (playing) Visualizer.start(); else Visualizer.stop();
-    } else {
-      document.getElementById('player-title').textContent = '—';
+    if (!t) {
+      document.getElementById('player-title').textContent  = '—';
       document.getElementById('player-artist').textContent = '';
+      document.getElementById('player-art').innerHTML = `<div class="art-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
+      const si = document.getElementById('side-art-img'); if (si) si.innerHTML = '';
+      const sp = document.getElementById('side-art-ph');  if (sp) sp.style.display = 'flex';
+      document.getElementById('side-title').textContent  = 'No track playing';
+      document.getElementById('side-artist').textContent = '';
+      document.getElementById('side-album').textContent  = '';
       document.title = 'Vibe';
-      Visualizer.stop();
+      Visualizer.stop(); return;
     }
-    UI.highlightActiveTrack();
-  }
+
+    const st = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    st('player-title',  t.title  || '—');
+    st('player-artist', t.artist || '');
+    st('side-title',    t.title  || '—');
+    st('side-artist',   t.artist || '');
+    st('side-album',    t.album  || '');
+    st('np-title',      t.title  || '—');
+    st('np-artist',     t.artist || '');
+    st('np-album',      t.album  || '');
+
+    const artH = t.artwork
+      ? `<img src="${t.artwork}" alt="">`
+      : `<div class="art-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
+    document.getElementById('player-art').innerHTML = artH;
+
+    const na = document.getElementById('np-art');     if (na) na.innerHTML = t.artwork ? `<img src="${t.artwork}" alt="">` : '';
+    const sa = document.getElementById('side-art-img'); if (sa) sa.innerHTML = t.artwork ? `<img src="${t.artwork}" alt="">` : '';
+    const sp = document.getElementById('side-art-ph');  if (sp) sp.style.display = t.artwork ? 'none' : 'flex';
+    const nb = document.getElementById('np-bg');       if (nb) nb.style.backgroundImage = t.artwork ? `url('${t.artwork}')` : 'none';
+
+    const liked = Library.likedIds.has(t.id);
+    ['btn-like', 'np-like'].forEach(id => {
+      const el = document.getElementById(id); if (!el) return;
+      el.classList.toggle('liked', liked);
+      el.textContent = liked ? '♥' : '♡';
+    });
+
+    document.title = `${t.title || '—'} — Vibe`;
+    if (on) Visualizer.start(App.config.visualizerMode || 'bars'); else Visualizer.stop();
+  },
 };
