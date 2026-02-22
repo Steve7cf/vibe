@@ -1,6 +1,6 @@
 {
   "name": "vibe",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Vibe - Professional Desktop Music Player",
   "homepage": "https://github.com/Steve7cf/vibe",
   "main": "src/main/main.js",

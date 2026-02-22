@@ -1047,22 +1047,130 @@ body[data-density="comfortable"] .today-mix-card { padding:32px 34px; }
 .palette-dot.active { border-color:rgba(255,255,255,.7); transform:scale(1.2); }
 
 /* Light theme */
+/* ═══════════════════════════════════════════════════════
+   LIGHT THEME — warm slate, not blinding white
+   ═══════════════════════════════════════════════════════ */
 body.light-theme {
-  --bg:     #f4f4f4;
-  --bg-1:   #ebebeb;
-  --bg-2:   #e2e2e2;
-  --bg-3:   #d8d8d8;
-  --bg-4:   #ccc;
-  --border: rgba(0,0,0,.1);
-  --border-2:rgba(0,0,0,.18);
-  --text-1: #111;
-  --text-2: #444;
-  --text-3: #888;
+  /* Warm off-white surfaces — never pure white */
+  --bg:      #f0ede8;
+  --bg-1:    #e8e4de;
+  --bg-2:    #dedad3;
+  --bg-3:    #d2cdc5;
+  --bg-4:    #c5bfb6;
+
+  /* Borders — warm dark with good visibility */
+  --border:   rgba(60,50,40,.12);
+  --border-2: rgba(60,50,40,.22);
+
+  /* Text — deep warm charcoal, not pure black */
+  --text-1:  #1a1714;
+  --text-2:  #3d3530;
+  --text-3:  #7a7068;
+
+  /* Scrollbar */
+  --scroll-thumb: rgba(60,50,40,.18);
 }
-body.light-theme #titlebar,
-body.light-theme #player-bar { background:rgba(240,240,240,.97) !important; }
-body.light-theme #sidebar     { background:var(--bg-1); border-right-color:var(--border); }
-body.light-theme .track-item:hover { background:rgba(0,0,0,.05); }
+
+/* Scrollbar in light mode */
+body.light-theme ::-webkit-scrollbar-thumb { background:rgba(60,50,40,.15); }
+body.light-theme ::-webkit-scrollbar-thumb:hover { background:rgba(60,50,40,.28); }
+
+/* Titlebar + player bar — slightly darker warm surface */
+body.light-theme #titlebar {
+  background:rgba(225,219,210,.97) !important;
+  border-bottom-color:rgba(60,50,40,.14) !important;
+}
+body.light-theme #player-bar {
+  background:rgba(220,214,205,.98) !important;
+  border-top-color:rgba(60,50,40,.14) !important;
+}
+
+/* Sidebar — darkest surface for contrast */
+body.light-theme #sidebar {
+  background:#dbd5cc;
+  border-right-color:rgba(60,50,40,.14);
+}
+body.light-theme .nav-btn { color:var(--text-2); }
+body.light-theme .nav-btn:hover { background:rgba(60,50,40,.08); color:var(--text-1); }
+body.light-theme .nav-btn.active { background:rgba(60,50,40,.12); color:var(--text-1); }
+
+/* Side panel */
+body.light-theme #side-panel { background:var(--bg-1); border-left-color:rgba(60,50,40,.12); }
+
+/* Cards and sections */
+body.light-theme .settings-sec,
+body.light-theme .pl-card,
+body.light-theme .track-card { background:var(--bg-2); border-color:rgba(60,50,40,.1); }
+body.light-theme .settings-sec h3 { color:var(--text-3); }
+
+/* Track rows */
+body.light-theme .track-item { border-bottom-color:rgba(60,50,40,.07); }
+body.light-theme .track-item:hover { background:rgba(60,50,40,.06); }
+body.light-theme .track-item.active { background:rgba(60,50,40,.1); }
+body.light-theme .track-num { color:var(--text-3); }
+body.light-theme .track-dur { color:var(--text-3); }
+body.light-theme .track-album { color:var(--text-3); }
+
+/* Seek & progress */
+body.light-theme .pb-seek-bg { background:rgba(60,50,40,.14); }
+body.light-theme .pb-vol-slider-wrap input[type=range] { background:rgba(60,50,40,.14); }
+
+/* Controls */
+body.light-theme .pb-icon-btn { color:var(--text-2); }
+body.light-theme .pb-icon-btn:hover { color:var(--text-1); background:rgba(60,50,40,.09); }
+body.light-theme .pb-ctrl-sm { color:var(--text-2); }
+body.light-theme .pb-ctrl-sm:hover { color:var(--text-1); background:rgba(60,50,40,.09); }
+body.light-theme .pb-ctrl { color:var(--text-2); }
+body.light-theme .pb-ctrl:hover { color:var(--text-1); background:rgba(60,50,40,.1); }
+body.light-theme .pb-play { background:var(--text-1) !important; color:#f0ede8 !important; box-shadow:0 4px 20px rgba(60,50,40,.25); }
+body.light-theme .pb-play:hover { box-shadow:0 6px 28px rgba(60,50,40,.35); }
+
+/* Topbar buttons */
+body.light-theme .topbar-btn { background:rgba(60,50,40,.07); border-color:rgba(60,50,40,.14); color:var(--text-2); }
+body.light-theme .topbar-btn:hover { background:rgba(60,50,40,.13); color:var(--text-1); }
+body.light-theme .topbar-icon-btn { background:rgba(60,50,40,.07); border-color:rgba(60,50,40,.14); color:var(--text-2); }
+body.light-theme .topbar-icon-btn:hover { color:var(--text-1); background:rgba(60,50,40,.13); }
+body.light-theme .topbar-palette { background:rgba(60,50,40,.05); border-color:rgba(60,50,40,.12); }
+body.light-theme .win-btn { background:rgba(60,50,40,.07); color:var(--text-2); }
+body.light-theme .win-btn:hover { background:rgba(60,50,40,.14); color:var(--text-1); }
+
+/* Search */
+body.light-theme #search-input { background:rgba(60,50,40,.07); border-color:rgba(60,50,40,.14); color:var(--text-1); }
+body.light-theme #search-input:focus { background:rgba(60,50,40,.1); border-color:rgba(60,50,40,.28); }
+body.light-theme #search-input::placeholder { color:var(--text-3); }
+
+/* Toggles */
+body.light-theme .toggle { background:rgba(60,50,40,.2); }
+body.light-theme input:checked + .toggle { background:var(--accent); }
+
+/* Select inputs */
+body.light-theme select,
+body.light-theme input[type=number] { background:var(--bg-3); border-color:rgba(60,50,40,.16); color:var(--text-1); }
+
+/* Ghost buttons */
+body.light-theme .ghost-btn { border-color:rgba(60,50,40,.18); color:var(--text-2); }
+body.light-theme .ghost-btn:hover { background:rgba(60,50,40,.08); color:var(--text-1); }
+
+/* Lib tabs */
+body.light-theme .lib-tab { color:var(--text-3); }
+body.light-theme .lib-tab.active { color:var(--text-1); border-bottom-color:var(--accent); }
+
+/* EQ */
+body.light-theme .eq-bands { background:var(--bg-2); }
+
+/* Now Playing overlay */
+body.light-theme #now-playing { background:rgba(230,224,215,.96); }
+
+/* Context menu & modal */
+body.light-theme .ctx-menu { background:var(--bg-2); border-color:rgba(60,50,40,.14); box-shadow:0 8px 32px rgba(60,50,40,.18); }
+body.light-theme .ctx-item { color:var(--text-1); }
+body.light-theme .ctx-item:hover { background:rgba(60,50,40,.07); }
+body.light-theme .ctx-sep { background:rgba(60,50,40,.1); }
+body.light-theme #modal { background:var(--bg-1); border-color:rgba(60,50,40,.14); }
+body.light-theme #modal-overlay { background:rgba(30,24,18,.4); }
+
+/* Toast */
+body.light-theme .toast { background:var(--text-1); color:#f0ede8; }
 
 /* ═══════════════════════════════════════════════════════
    SETTINGS — make sure visible + spacious

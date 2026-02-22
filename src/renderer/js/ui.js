@@ -312,6 +312,48 @@ const UI = {
     });
 
     document.getElementById('btn-sleep')?.addEventListener('click', () => Player.setSleepTimer(parseInt(document.getElementById('s-sleep').value)||0));
+
+    // Reset settings to defaults
+    document.getElementById('btn-reset-settings')?.addEventListener('click', () =>
+      Utils.modal('Reset Settings', 'Reset all settings to defaults? Your library and playlists are kept.', () => {
+        const defaults = {
+          volume: 0.8, balance: 0, speed: 1, crossfade: 3,
+          fadeIn: true, fadeOut: true, gapless: false, gaplessOffset: 8,
+          shuffle: false, repeat: 'off', stopAfterCurrent: false,
+          accentColor: '#1db954', useAlbumColors: true,
+          visualizerMode: 'bars', notifications: true,
+          globalHotkeys: true, fontSize: 14, density: 'normal',
+          lightTheme: false,
+          folders: App.config.folders || [],
+          onboardingDone: true,
+          lastTrackId: App.config.lastTrackId,
+          lastPosition: App.config.lastPosition,
+          todayMixIds: App.config.todayMixIds,
+          lastMixDate: App.config.lastMixDate,
+        };
+        Object.assign(App.config, defaults);
+        App.save();
+        // Apply immediately
+        AudioEngine.setVolume(defaults.volume);
+        AudioEngine.setBalance(defaults.balance);
+        AudioEngine.setSpeed(defaults.speed);
+        AudioEngine.config.crossfade = defaults.crossfade;
+        AudioEngine.config.fadeIn = defaults.fadeIn;
+        AudioEngine.config.fadeOut = defaults.fadeOut;
+        AudioEngine.config.gapless = defaults.gapless;
+        AudioEngine.config.gaplessOffset = defaults.gaplessOffset;
+        Player.shuffle = defaults.shuffle;
+        Player.repeat  = defaults.repeat;
+        Player.stopAfterCurrent = false;
+        Player._updateRepeatBtn?.();
+        document.getElementById('btn-shuffle')?.classList.toggle('active', false);
+        document.documentElement.style.setProperty('--font-size-base', '14px');
+        document.body.classList.remove('light-theme');
+        Utils.applyAccent('#1db954');
+        this.applySettings(defaults);
+        Utils.toast('Settings reset to defaults');
+      })
+    );
     document.getElementById('btn-clear-lib')?.addEventListener('click', () =>
       Utils.modal('Clear Library','Remove ALL tracks?', async () => {
         Library.tracks=[]; Library.recentIds=[]; Library.playCount={}; Library.lastPlayedAt={};
@@ -345,22 +387,41 @@ const UI = {
     document.getElementById('ctx-remove')?.addEventListener('click', () => {
       if (!this.ctxId) return;
       if (this.ctxPlId) {
-        // Inside a playlist view — remove only from that playlist
         Library.removeFromPlaylist(this.ctxPlId, this.ctxId);
-        // Splice from queue if present (but not if it's currently playing)
         const qIdx = Player.queue.findIndex(t => t.id === this.ctxId);
         if (qIdx !== -1 && qIdx !== Player.currentIndex) Player.removeFromQueue(qIdx);
         this._renderPlDetail(this.ctxPlId);
         Utils.toast('Removed from playlist');
       } else {
-        // Library view — remove from library entirely
         Library.removeTrack(this.ctxId);
-        // Remove from queue too
         const qIdx = Player.queue.findIndex(t => t.id === this.ctxId);
         if (qIdx !== -1 && qIdx !== Player.currentIndex) Player.removeFromQueue(qIdx);
         this.renderHome(); this.renderLibrary(this.libTab);
-        Utils.toast('Track removed');
+        Utils.toast('Removed from library');
       }
+      this.ctxPlId = null;
+    });
+
+    document.getElementById('ctx-delete')?.addEventListener('click', () => {
+      if (!this.ctxId) return;
+      const track = Library.tracks.find(t => t.id === this.ctxId);
+      if (!track) return;
+      Utils.modal(
+        'Delete from Disk',
+        `Permanently delete "${Utils.sanitize(track.title || track.path)}" from your computer? This cannot be undone.`,
+        async () => {
+          const result = await window.vibeAPI.deleteFile(track.path);
+          if (result.ok) {
+            Library.removeTrack(track.id);
+            const qIdx = Player.queue.findIndex(t => t.id === track.id);
+            if (qIdx !== -1 && qIdx !== Player.currentIndex) Player.removeFromQueue(qIdx);
+            this.renderHome(); this.renderLibrary(this.libTab);
+            Utils.toast('File deleted from disk');
+          } else {
+            Utils.toast('Could not delete file: ' + (result.error || 'unknown error'));
+          }
+        }
+      );
       this.ctxPlId = null;
     });
   },

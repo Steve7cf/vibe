@@ -12,7 +12,9 @@ const Player = {
   isDraggingSeek: false,
   stopAfterCurrent: false,
   _crossfadeActive: false,
-  _crossfadeAt: 0,      // timestamp when last crossfade started
+  _crossfadeAt: 0,
+  _pendingNextTrack: null,
+  _pendingNextIndex: -1,
   _sleepTimer: null,
   _tickLast: 0,
 
@@ -29,18 +31,8 @@ const Player = {
   setQueue(tracks, startAt = 0) {
     this._crossfadeActive = false;
     AudioEngine._crossfading = false;
-    let ordered = [...tracks];
-    // When gapless/crossfade is on, sort by energy (bitrate) so adjacent tracks
-    // have similar tempo — transitions feel musical, not jarring
-    if (AudioEngine.config.gapless && ordered.length > 2) {
-      const currentTrack = ordered[startAt];
-      ordered = Library.sortForCrossfade(ordered);
-      // Keep startAt pointing at the same track after sort
-      const newIdx = ordered.findIndex(t => t.id === currentTrack?.id);
-      if (newIdx >= 0) startAt = newIdx;
-    }
-    this.queue         = ordered;
-    this.originalQueue = ordered;
+    this.queue         = [...tracks];
+    this.originalQueue = [...tracks];
     if (this.shuffle) { this._doShuffle(startAt); startAt = 0; }
     this._play(startAt);
   },
@@ -217,37 +209,51 @@ const Player = {
     // Stage next track into buffer well before we need it (only when crossfade is on)
     if (AudioEngine.config.gapless && rem < xfadeSec + 60) AudioEngine.stageNext(next);
 
-    // When remaining time == crossfade window: start the overlap
-    // Cooldown: must be at least (xfadeSec + 5) seconds since last crossfade
+    // Crossfade: fire once when remaining time hits the overlap window
     const cooldownOk = (Date.now() - this._crossfadeAt) > (xfadeSec + 5) * 1000;
     if (AudioEngine.config.gapless && !this._crossfadeActive && cooldownOk && rem <= xfadeSec && rem > 0.5) {
-      this._crossfadeActive = true;
-      this._crossfadeAt = Date.now();
+      this._crossfadeActive  = true;
+      this._crossfadeAt      = Date.now();
+      // Snapshot the exact next track object right now — no index math later
+      this._pendingNextIndex = this.currentIndex + 1;
+      this._pendingNextTrack = this.queue[this._pendingNextIndex];
 
-      // Update queue state & UI to show next track NOW (it's already playing)
-      this.currentIndex++;
-      this.currentTrack = next;
-      Library.recordPlay(next.id);
-      this._updateUI();
-      this._applyAlbumColor();
-      UI.highlightActive();
-      UI.syncNowPlaying();
-      UI._updatePalette(next.artwork || null);
-      if (App?.config?.notifications) window.vibeAPI.notifyTrack(next);
-
-      // Pre-buffer the track after next
-      const afterNext = this.queue[this.currentIndex + 1];
+      // Pre-buffer the song after that
+      const afterNext = this.queue[this._pendingNextIndex + 1];
       if (afterNext) AudioEngine.stageNext(afterNext);
 
-      // Fire dual-element crossfade — both songs playing, gains crossing over xfadeSec
       AudioEngine.startCrossfade(xfadeSec);
     }
   },
 
-  // Called when crossfade audio completes — nothing left to do,
-  // queue/UI already updated in _onTick crossfade block
   _onCrossfadeDone() {
     this._crossfadeActive = false;
+
+    // Use the exact track object + index we snapshotted at crossfade trigger time
+    const incoming  = this._pendingNextTrack;
+    const incomingIdx = this._pendingNextIndex;
+    this._pendingNextTrack = null;
+    this._pendingNextIndex = -1;
+    if (!incoming) return;
+
+    // Apply state atomically — both index and track from the same snapshot
+    this.currentIndex = incomingIdx;
+    this.currentTrack = incoming;
+    Library.recordPlay(incoming.id);
+
+    this._updateUI();
+    this._applyAlbumColor();
+    UI.highlightActive();
+    UI.syncNowPlaying();
+    UI._updatePalette(incoming.artwork || null);
+    if (App?.config?.notifications) window.vibeAPI.notifyTrack(incoming);
+
+    // Read duration from new audio slot now that the flip is done
+    const dur = AudioEngine.duration;
+    if (dur) {
+      const tt = document.getElementById('time-tot'); if (tt) tt.textContent = Utils.formatTime(dur);
+      const nd = document.getElementById('np-dur');   if (nd) nd.textContent = Utils.formatTime(dur);
+    }
   },
 
   _updateRepeatBtn() {

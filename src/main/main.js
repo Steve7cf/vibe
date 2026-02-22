@@ -272,3 +272,19 @@ ipcMain.on('notify-track', (_,track) => {
 });
 ipcMain.handle('get-audio-devices', async () => [{id:'default',label:'Default Output Device'}]);
 ipcMain.on('open-external', (_,url) => shell.openExternal(url));
+
+ipcMain.handle('delete-file', async (_, filePath) => {
+  try {
+    const { shell } = require('electron');
+    await shell.trashItem(filePath);
+    return { ok: true };
+  } catch (e) {
+    // Fallback: permanent delete
+    try {
+      require('fs').unlinkSync(filePath);
+      return { ok: true };
+    } catch (e2) {
+      return { ok: false, error: e2.message };
+    }
+  }
+});
