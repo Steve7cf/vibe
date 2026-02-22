@@ -10,21 +10,37 @@ const Player = {
   repeat: 'off',      // 'off' | 'all' | 'one'
   isPlaying: false,
   isDraggingSeek: false,
+  stopAfterCurrent: false,
+  _crossfadeActive: false,
+  _crossfadeAt: 0,      // timestamp when last crossfade started
   _sleepTimer: null,
   _tickLast: 0,
 
   init() {
     AudioEngine
-      .on('ended',          () => this._onEnded())
-      .on('timeupdate',     () => this._onTick())
-      .on('loadedmetadata', () => this._onMeta())
-      .on('error',          () => this._onError());
+      .on('ended',           () => this._onEnded())
+      .on('timeupdate',      () => this._onTick())
+      .on('loadedmetadata',  () => this._onMeta())
+      .on('error',           () => this._onError())
+      .on('crossfade-done',  () => this._onCrossfadeDone());
   },
 
   // ── Queue ───────────────────────────────────────────────────────────────────
   setQueue(tracks, startAt = 0) {
-    this.queue         = [...tracks];
-    this.originalQueue = [...tracks];
+    this._crossfadeActive = false;
+    AudioEngine._crossfading = false;
+    let ordered = [...tracks];
+    // When gapless/crossfade is on, sort by energy (bitrate) so adjacent tracks
+    // have similar tempo — transitions feel musical, not jarring
+    if (AudioEngine.config.gapless && ordered.length > 2) {
+      const currentTrack = ordered[startAt];
+      ordered = Library.sortForCrossfade(ordered);
+      // Keep startAt pointing at the same track after sort
+      const newIdx = ordered.findIndex(t => t.id === currentTrack?.id);
+      if (newIdx >= 0) startAt = newIdx;
+    }
+    this.queue         = ordered;
+    this.originalQueue = ordered;
     if (this.shuffle) { this._doShuffle(startAt); startAt = 0; }
     this._play(startAt);
   },
@@ -43,13 +59,14 @@ const Player = {
     this._applyAlbumColor();
     UI.highlightActive();
     UI.syncNowPlaying();
+    UI._updatePalette(this.currentTrack?.artwork || null);
     if (App.config.notifications) window.vibeAPI.notifyTrack(this.currentTrack);
   },
 
   play()    { if (!this.currentTrack && this.queue.length) { this._play(0); return; } AudioEngine.play().then(() => { this.isPlaying = true; this._updateUI(); }); },
   pause()   { AudioEngine.pause(); this.isPlaying = false; this._updateUI(); },
   toggle()  { this.isPlaying ? this.pause() : this.play(); },
-  stop()    { AudioEngine.stop(); this.isPlaying = false; this._updateUI(); },
+  stop()    { this._crossfadeActive = false; AudioEngine.stop(); this.isPlaying = false; this._updateUI(); },
   playAt(i) { this._play(i); },
 
   async next() {
@@ -59,6 +76,8 @@ const Player = {
   },
 
   prev() {
+    this._crossfadeActive = false;
+    AudioEngine._crossfading = false;
     if (AudioEngine.currentTime > 3) { AudioEngine.seekTo(0); return; }
     const p = this.currentIndex - 1;
     p < 0 ? (this.repeat === 'all' ? this._play(this.queue.length - 1) : AudioEngine.seekTo(0)) : this._play(p);
@@ -158,7 +177,7 @@ const Player = {
     Utils.applyAccent(hex || App.config.accentColor || '#1db954');
   },
 
-  _onEnded() { this.next(); },
+  _onEnded() { if (this._crossfadeActive) return; if (this.stopAfterCurrent) { this.stopAfterCurrent = false; this.stop(); const el = document.getElementById('s-stop-after'); if (el) el.checked = false; } else { this.next(); } },
   _onError() { console.warn('[Player] error on', this.currentTrack?.path); setTimeout(() => this.next(), 900); },
 
   _onMeta() {
@@ -167,23 +186,68 @@ const Player = {
     const b = document.getElementById('np-dur');    if (b) b.textContent = d;
   },
 
-  // Throttled tick — 250ms max update rate keeps CPU idle when nothing changes
+  // Throttled tick — 250ms max update rate
   _onTick() {
     const now = Date.now();
     if (now - this._tickLast < 250) return;
     this._tickLast = now;
     if (this.isDraggingSeek) return;
-    const cur = AudioEngine.currentTime, dur = AudioEngine.duration || 0;
+
+    const cur = AudioEngine.currentTime;
+    const dur = AudioEngine.duration || 0;
     const pct = dur > 0 ? cur / dur : 0;
     const w   = `${pct * 100}%`;
+    const rem = dur - cur;
+
     const sf = document.getElementById('seek-fill'); if (sf) sf.style.width = w;
-    const tc = document.getElementById('time-cur'); if (tc) tc.textContent = Utils.formatTime(cur);
+    const tc = document.getElementById('time-cur');  if (tc) tc.textContent = Utils.formatTime(cur);
+    const tt = document.getElementById('time-tot');  if (tt && dur) tt.textContent = Utils.formatTime(dur);
+
     if (!document.getElementById('now-playing').classList.contains('hidden')) {
       const nf = document.getElementById('np-seek-fill'); if (nf) nf.style.width = w;
-      const nc = document.getElementById('np-cur'); if (nc) nc.textContent = Utils.formatTime(cur);
+      const nc = document.getElementById('np-cur');        if (nc) nc.textContent = Utils.formatTime(cur);
     }
+
     const next = this.queue[this.currentIndex + 1];
-    if (next && dur > 0 && (dur - cur) < 20) AudioEngine.preloadNext(next);
+    if (!next || !dur) return;
+
+    // gaplessOffset = how many seconds the two songs overlap (the crossfade window)
+    const xfadeSec = Math.max(1, AudioEngine.config.gaplessOffset || 20);
+
+    // Stage next track into buffer well before we need it (only when crossfade is on)
+    if (AudioEngine.config.gapless && rem < xfadeSec + 60) AudioEngine.stageNext(next);
+
+    // When remaining time == crossfade window: start the overlap
+    // Cooldown: must be at least (xfadeSec + 5) seconds since last crossfade
+    const cooldownOk = (Date.now() - this._crossfadeAt) > (xfadeSec + 5) * 1000;
+    if (AudioEngine.config.gapless && !this._crossfadeActive && cooldownOk && rem <= xfadeSec && rem > 0.5) {
+      this._crossfadeActive = true;
+      this._crossfadeAt = Date.now();
+
+      // Update queue state & UI to show next track NOW (it's already playing)
+      this.currentIndex++;
+      this.currentTrack = next;
+      Library.recordPlay(next.id);
+      this._updateUI();
+      this._applyAlbumColor();
+      UI.highlightActive();
+      UI.syncNowPlaying();
+      UI._updatePalette(next.artwork || null);
+      if (App?.config?.notifications) window.vibeAPI.notifyTrack(next);
+
+      // Pre-buffer the track after next
+      const afterNext = this.queue[this.currentIndex + 1];
+      if (afterNext) AudioEngine.stageNext(afterNext);
+
+      // Fire dual-element crossfade — both songs playing, gains crossing over xfadeSec
+      AudioEngine.startCrossfade(xfadeSec);
+    }
+  },
+
+  // Called when crossfade audio completes — nothing left to do,
+  // queue/UI already updated in _onTick crossfade block
+  _onCrossfadeDone() {
+    this._crossfadeActive = false;
   },
 
   _updateRepeatBtn() {
@@ -217,12 +281,12 @@ const Player = {
     }
 
     const st = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-    st('player-title',  t.title  || '—');
+    st('player-title',  t.title  || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : '—'));
     st('player-artist', t.artist || '');
-    st('side-title',    t.title  || '—');
+    st('side-title',    t.title  || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : '—'));
     st('side-artist',   t.artist || '');
     st('side-album',    t.album  || '');
-    st('np-title',      t.title  || '—');
+    st('np-title',      t.title  || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/, '') : '—'));
     st('np-artist',     t.artist || '');
     st('np-album',      t.album  || '');
 
@@ -240,7 +304,6 @@ const Player = {
     ['btn-like', 'np-like'].forEach(id => {
       const el = document.getElementById(id); if (!el) return;
       el.classList.toggle('liked', liked);
-      el.textContent = liked ? '♥' : '♡';
     });
 
     document.title = `${t.title || '—'} — Vibe`;

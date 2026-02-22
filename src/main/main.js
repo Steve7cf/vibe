@@ -192,32 +192,69 @@ ipcMain.handle('scan-folder', (_, folderPath) => {
 
 // ── IPC: metadata ─────────────────────────────────────────────────────────────
 ipcMain.handle('read-metadata', async (_,filePath) => {
+  const filename = path.basename(filePath, path.extname(filePath));
   const fb = {
-    title:path.basename(filePath,path.extname(filePath)),
-    artist:'Unknown Artist',album:'Unknown Album',genre:'',
-    year:null,track:0,duration:0,bitrate:0,sampleRate:0,artwork:null,path:filePath
+    title: filename, artist:'', album:'', genre:'',
+    year:null, track:0, duration:0, bitrate:0, sampleRate:0, artwork:null, path:filePath
   };
   try {
-    const mm   = require('music-metadata');
-    const meta = await mm.parseFile(filePath,{skipCovers:false,duration:true});
-    const c    = meta.common;
-    let artwork = null;
-    if (c.picture?.length) {
-      const pic = c.picture[0];
-      artwork = `data:${pic.format||'image/jpeg'};base64,${Buffer.from(pic.data).toString('base64')}`;
+    // Try music-metadata (installed) or node-id3 as fallback
+    let mm;
+    try { mm = require('music-metadata'); } catch(_) {}
+
+    if (mm) {
+      const meta = await mm.parseFile(filePath, { skipCovers:false, duration:true, includeChapters:false });
+      const c    = meta.common;
+      let artwork = null;
+      if (c.picture?.length) {
+        const pic = c.picture[0];
+        const fmt = pic.format || 'image/jpeg';
+        artwork = `data:${fmt};base64,${Buffer.from(pic.data).toString('base64')}`;
+      }
+      return {
+        title:     (c.title    || filename).trim(),
+        artist:    (c.artist   || c.albumartist || '').trim(),
+        album:     (c.album    || '').trim(),
+        genre:     c.genre?.length ? c.genre[0] : '',
+        year:      c.year || null,
+        track:     c.track?.no || 0,
+        duration:  meta.format.duration || 0,
+        bitrate:   Math.round((meta.format.bitrate || 0) / 1000),
+        sampleRate:meta.format.sampleRate || 0,
+        artwork, path:filePath
+      };
     }
-    return {
-      title:   (c.title||fb.title).trim(),
-      artist:  (c.artist||c.albumartist||fb.artist).trim(),
-      album:   (c.album||fb.album).trim(),
-      genre:   c.genre?.length ? c.genre[0] : '',
-      year:    c.year||null, track:c.track?.no||0,
-      duration:meta.format.duration||0,
-      bitrate: Math.round((meta.format.bitrate||0)/1000),
-      sampleRate:meta.format.sampleRate||0,
-      artwork, path:filePath
-    };
-  } catch(_) { return fb; }
+
+    // Fallback: node-id3 for MP3 files
+    const ext = path.extname(filePath).toLowerCase();
+    if (ext === '.mp3') {
+      try {
+        const ID3 = require('node-id3');
+        const tags = ID3.read(filePath);
+        let artwork = null;
+        if (tags.image?.imageBuffer) {
+          const fmt = tags.image.mime || 'image/jpeg';
+          artwork = `data:${fmt};base64,${tags.image.imageBuffer.toString('base64')}`;
+        }
+        return {
+          title:     (tags.title  || filename).trim(),
+          artist:    (tags.artist || '').trim(),
+          album:     (tags.album  || '').trim(),
+          genre:     tags.genre   || '',
+          year:      tags.year    || null,
+          track:     parseInt(tags.trackNumber) || 0,
+          duration:  0,   // will be probed in renderer via Audio element
+          bitrate:   0,
+          sampleRate:0,
+          artwork, path:filePath
+        };
+      } catch(_) {}
+    }
+    return fb;
+  } catch(e) {
+    console.warn('[meta]', filePath, e.message);
+    return fb;
+  }
 });
 
 // ── IPC: window controls ──────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ const UI = {
   libTab:  'all',
   query:   '',
   ctxId:   null,
+  ctxPlId: null,
   _scanBusy: false,
   _muteVol:  0.8,
   _muted:    false,
@@ -28,6 +29,7 @@ const UI = {
     this._bindDrop();
     this._bindNowPlayingControls();
     this._bindHomeDelegation();
+    this._bindThemeAndPalette();
   },
 
   // ── Navigation ────────────────────────────────────────────────────
@@ -273,6 +275,42 @@ const UI = {
       else if (Player.currentTrack?.artwork) Utils.extractColor(Player.currentTrack.artwork).then(c => { if(c) Utils.applyAccent(c); });
     });
     document.getElementById('s-accent')?.addEventListener('input', e => { Utils.applyAccent(e.target.value); App.updateConfig('accentColor', e.target.value); });
+
+    // Gapless
+    document.getElementById('s-gapless')?.addEventListener('change', e => {
+      AudioEngine.config.gapless = e.target.checked;
+      document.getElementById('s-gapless-sub')?.classList.toggle('dimmed', !e.target.checked);
+      App.updateConfig('gapless', e.target.checked);
+    });
+    document.getElementById('s-gapless-offset')?.addEventListener('input', e => {
+      const v = parseInt(e.target.value);
+      document.getElementById('s-gapless-offset-val').textContent = v + 's';
+      const hint = document.getElementById('s-gapless-hint-val');
+      if (hint) hint.textContent = v + 's';
+      AudioEngine.config.gaplessOffset = v;
+      App.updateConfig('gaplessOffset', v);
+    });
+
+    // Stop after current
+    document.getElementById('s-stop-after')?.addEventListener('change', e => {
+      Player.stopAfterCurrent = e.target.checked;
+      App.updateConfig('stopAfterCurrent', e.target.checked);
+    });
+
+    // Font size
+    document.getElementById('s-fontsize')?.addEventListener('input', e => {
+      const v = parseInt(e.target.value);
+      document.getElementById('s-fontsize-val').textContent = v + 'px';
+      document.documentElement.style.setProperty('--font-size-base', v + 'px');
+      App.updateConfig('fontSize', v);
+    });
+
+    // Density
+    document.getElementById('s-density')?.addEventListener('change', e => {
+      this._applyDensity(e.target.value);
+      App.updateConfig('density', e.target.value);
+    });
+
     document.getElementById('btn-sleep')?.addEventListener('click', () => Player.setSleepTimer(parseInt(document.getElementById('s-sleep').value)||0));
     document.getElementById('btn-clear-lib')?.addEventListener('click', () =>
       Utils.modal('Clear Library','Remove ALL tracks?', async () => {
@@ -291,6 +329,7 @@ const UI = {
       if (!item) { menu.classList.add('hidden'); return; }
       e.preventDefault();
       this.ctxId = item.dataset.id;
+      this.ctxPlId = item.dataset.plid || null;   // set by pl detail rows, null elsewhere
       menu.style.left = Math.min(e.clientX, window.innerWidth-200)+'px';
       menu.style.top  = Math.min(e.clientY, window.innerHeight-210)+'px';
       menu.classList.remove('hidden');
@@ -305,7 +344,24 @@ const UI = {
     document.getElementById('ctx-info')?.addEventListener('click',   () => { const t=T(); if(t) this._trackInfoModal(t); });
     document.getElementById('ctx-remove')?.addEventListener('click', () => {
       if (!this.ctxId) return;
-      Library.removeTrack(this.ctxId); this.renderHome(); this.renderLibrary(this.libTab); Utils.toast('Track removed');
+      if (this.ctxPlId) {
+        // Inside a playlist view — remove only from that playlist
+        Library.removeFromPlaylist(this.ctxPlId, this.ctxId);
+        // Splice from queue if present (but not if it's currently playing)
+        const qIdx = Player.queue.findIndex(t => t.id === this.ctxId);
+        if (qIdx !== -1 && qIdx !== Player.currentIndex) Player.removeFromQueue(qIdx);
+        this._renderPlDetail(this.ctxPlId);
+        Utils.toast('Removed from playlist');
+      } else {
+        // Library view — remove from library entirely
+        Library.removeTrack(this.ctxId);
+        // Remove from queue too
+        const qIdx = Player.queue.findIndex(t => t.id === this.ctxId);
+        if (qIdx !== -1 && qIdx !== Player.currentIndex) Player.removeFromQueue(qIdx);
+        this.renderHome(); this.renderLibrary(this.libTab);
+        Utils.toast('Track removed');
+      }
+      this.ctxPlId = null;
     });
   },
 
@@ -421,8 +477,8 @@ const UI = {
         <button class="card-play-btn"><svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="#000"/></svg></button>
       </div>
       <div class="card-info">
-        <div class="card-title">${Utils.sanitize(t.title||'Unknown')}</div>
-        <div class="card-artist">${Utils.sanitize(t.artist||'Unknown Artist')}</div>
+        <div class="card-title">${Utils.sanitize(t.title || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,'') : '—'))}</div>
+        <div class="card-artist">${Utils.sanitize(t.artist || '')}</div>
         ${showPlays && cnt > 0 ? `<div class="card-count">${cnt} play${cnt!==1?'s':''}</div>` : ''}
       </div>
     </div>`;
@@ -454,8 +510,8 @@ const UI = {
     container.querySelectorAll(`[data-${type}]`).forEach(card => {
       card.addEventListener('click', () => {
         let tracks;
-        if (type==='artist') tracks = Library.tracks.filter(t=>(t.artist||'Unknown Artist')===card.dataset.artist);
-        else if (type==='album') tracks = Library.tracks.filter(t=>(t.album||'Unknown Album')===card.dataset.album&&(t.artist||'Unknown Artist')===card.dataset.artist);
+        if (type==='artist') tracks = Library.tracks.filter(t=>(t.artist || '')===card.dataset.artist);
+        else if (type==='album') tracks = Library.tracks.filter(t=>(t.album || '')===card.dataset.album&&(t.artist || '')===card.dataset.artist);
         else tracks = Library.tracks.filter(t=>(t.genre||'Unknown')===card.dataset.genre);
         container.innerHTML = `<button class="back-btn" id="bk-${type}">← ${type.charAt(0).toUpperCase()+type.slice(1)}s</button>${this._trackList(tracks)}`;
         this._bindTrackRows(container);
@@ -482,8 +538,8 @@ const UI = {
         <div class="track-num">${num}</div>
         <div class="track-art-sm">${art}</div>
         <div class="track-main">
-          <div class="track-name">${Utils.sanitize(t.title||'Unknown')}</div>
-          <div class="track-by">${Utils.sanitize(t.artist||'Unknown Artist')}</div>
+          <div class="track-name">${Utils.sanitize(t.title || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,'') : '—'))}</div>
+          <div class="track-by">${Utils.sanitize(t.artist || '')}</div>
         </div>
         <div class="track-album">${Utils.sanitize(t.album||'—')}</div>
         <div class="track-dur">${Utils.formatTime(t.duration)}</div>
@@ -565,7 +621,15 @@ const UI = {
     document.getElementById('pls-grid').classList.add('hidden');
     const detail = document.getElementById('pl-detail');
     detail.classList.remove('hidden');
+    this._renderPlDetail(id);
+  },
+
+  // Separate render method so we can call it after every mutation
+  _renderPlDetail(id) {
+    const pl = Library.playlists.find(p=>p.id===id); if (!pl) return;
+    const detail = document.getElementById('pl-detail');
     const tracks = Library.getPlaylistTracks(id);
+
     document.getElementById('pl-detail-content').innerHTML = `
       <div class="view-header">
         <h2>${Utils.sanitize(pl.name)}</h2>
@@ -575,10 +639,34 @@ const UI = {
           <button class="ghost-btn danger" id="pl-delete">Delete</button>
         </div>
       </div>
-      ${this._trackList(tracks)}`;
-    this._bindTrackRows(detail);
-    document.getElementById('pl-play')?.addEventListener('click', () => { if(tracks.length) Player.setQueue(tracks,0); });
+      <div class="track-rows">
+        ${tracks.length ? tracks.map((t,i) => {
+          const art = t.artwork ? `<img src="${t.artwork}" loading="lazy">` : `<div class="art-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
+          const act = Player.currentTrack?.id === t.id;
+          return `<div class="track-item${act?' active':''}" data-id="${t.id}" data-plid="${id}">
+            <div class="track-num">${act&&Player.isPlaying?'<div class="bars"><span></span><span></span><span></span></div>':i+1}</div>
+            <div class="track-art-sm">${art}</div>
+            <div class="track-main">
+              <div class="track-name">${Utils.sanitize(t.title||(t.path?t.path.split(/[/\\]/).pop().replace(/\.[^.]+$/,''):'—'))}</div>
+              <div class="track-by">${Utils.sanitize(t.artist||'')}</div>
+            </div>
+            <div class="track-album">${Utils.sanitize(t.album||'—')}</div>
+            <div class="track-dur">${Utils.formatTime(t.duration)}</div>
+            <div class="track-actions">
+              <button class="track-action-btn rm-pl-btn" data-trackid="${t.id}" title="Remove from playlist">✕</button>
+            </div>
+          </div>`;
+        }).join('') : '<div class="empty-state">No tracks in this playlist</div>'}
+      </div>`;
+
+    // Play all
+    document.getElementById('pl-play')?.addEventListener('click', () => {
+      const fresh = Library.getPlaylistTracks(id);
+      if (fresh.length) Player.setQueue(fresh, 0);
+    });
+    // Export
     document.getElementById('pl-export')?.addEventListener('click', () => Library.exportPlaylist(id));
+    // Delete playlist
     document.getElementById('pl-delete')?.addEventListener('click', () =>
       Utils.modal('Delete Playlist', `Delete "${Utils.sanitize(pl.name)}"?`, () => {
         Library.deletePlaylist(id);
@@ -587,6 +675,38 @@ const UI = {
         this.renderPlaylists();
       })
     );
+    // Double-click a row → play from that track
+    detail.querySelectorAll('.track-item').forEach((item, i) => {
+      item.addEventListener('dblclick', () => {
+        const fresh = Library.getPlaylistTracks(id);
+        Player.setQueue(fresh, i);
+      });
+      item.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        this.ctxId = item.dataset.id;
+        this.ctxPlId = id;
+        const menu = document.getElementById('ctx-menu');
+        menu.style.left = Math.min(e.clientX, window.innerWidth-160)+'px';
+        menu.style.top  = Math.min(e.clientY, window.innerHeight-200)+'px';
+        menu.classList.remove('hidden');
+      });
+    });
+    // Remove from playlist — live, no refresh needed
+    detail.querySelectorAll('.rm-pl-btn').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const trackId = btn.dataset.trackid;
+        Library.removeFromPlaylist(id, trackId);
+        // If this track is in the active queue, also splice it out
+        const qIdx = Player.queue.findIndex(t => t.id === trackId);
+        if (qIdx !== -1 && qIdx !== Player.currentIndex) {
+          Player.removeFromQueue(qIdx);
+        }
+        // Re-render the detail view instantly — no refresh required
+        this._renderPlDetail(id);
+        Utils.toast('Removed from playlist');
+      });
+    });
   },
 
   _renderLibFolders() {
@@ -862,6 +982,33 @@ const UI = {
       </div>`, null, 'Close', true);
   },
 
+  // ── Density presets ───────────────────────────────────────────────
+  _applyDensity(density) {
+    const root = document.documentElement;
+    if (density === 'comfortable') {
+      root.style.setProperty('--track-item-h', '68px');
+      root.style.setProperty('--player-h',     '100px');
+      root.style.setProperty('--nav-btn-py',   '13px');
+      root.style.setProperty('--card-gap',     '16px');
+      root.style.setProperty('--section-mb',   '40px');
+      root.style.setProperty('--view-px',      '36px');
+    } else if (density === 'compact') {
+      root.style.setProperty('--track-item-h', '46px');
+      root.style.setProperty('--player-h',     '76px');
+      root.style.setProperty('--nav-btn-py',   '7px');
+      root.style.setProperty('--card-gap',     '10px');
+      root.style.setProperty('--section-mb',   '24px');
+      root.style.setProperty('--view-px',      '20px');
+    } else {
+      root.style.setProperty('--track-item-h', '58px');
+      root.style.setProperty('--player-h',     '90px');
+      root.style.setProperty('--nav-btn-py',   '10px');
+      root.style.setProperty('--card-gap',     '13px');
+      root.style.setProperty('--section-mb',   '34px');
+      root.style.setProperty('--view-px',      '30px');
+    }
+  },
+
   // ── Apply settings to the settings panel inputs ───────────────────
   applySettings(cfg) {
     const set    = (id,v)=>{const el=document.getElementById(id);if(el)el.value=v;};
@@ -880,7 +1027,146 @@ const UI = {
     setChk('s-hotkeys',      cfg.globalHotkeys!==false);
     setChk('s-album-colors', !!cfg.useAlbumColors);
     this._renderLibFolders();
+
+    // Gapless
+    const gs = document.getElementById('s-gapless');
+    if (gs) { gs.checked = !!cfg.gapless; AudioEngine.config.gapless = !!cfg.gapless; }
+    const gss = document.getElementById('s-gapless-sub');
+    if (gss) gss.classList.toggle('dimmed', !cfg.gapless);
+    const offset = cfg.gaplessOffset || 20;
+    const go = document.getElementById('s-gapless-offset');
+    if (go) { go.value = offset; }
+    const gov = document.getElementById('s-gapless-offset-val');
+    if (gov) gov.textContent = offset + 's';
+    const goh = document.getElementById('s-gapless-hint-val');
+    if (goh) goh.textContent = offset + 's';
+    AudioEngine.config.gaplessOffset = offset;
+
+    // Font size
+    const fs = cfg.fontSize || 14;
+    const fsel = document.getElementById('s-fontsize');
+    if (fsel) { fsel.value = fs; document.getElementById('s-fontsize-val').textContent = fs+'px'; }
+    document.documentElement.style.setProperty('--font-size-base', fs+'px');
+
+    // Density
+    const den = cfg.density || 'normal';
+    const dsel = document.getElementById('s-density');
+    if (dsel) dsel.value = den;
+    this._applyDensity(den);
+
+    // Stop after current
+    const sac = document.getElementById('s-stop-after');
+    if (sac) sac.checked = !!cfg.stopAfterCurrent;
   },
 
   _empty: msg => `<div class="empty"><p>${msg}</p></div>`,
+
+  // ── Theme toggle ──────────────────────────────────────────────────
+  _bindThemeAndPalette() {
+    const btn = document.getElementById('btn-theme');
+    if (!btn) return;
+
+    // Restore saved theme
+    if (App.config.lightTheme) this._applyTheme(true);
+
+    btn.addEventListener('click', () => {
+      const light = !document.body.classList.contains('light-theme');
+      this._applyTheme(light);
+      App.updateConfig('lightTheme', light);
+    });
+
+    // Palette dots — clicking applies that color as accent
+    document.querySelectorAll('.palette-dot').forEach(dot => {
+      dot.addEventListener('click', () => {
+        const col = dot.style.background;
+        if (!col) return;
+        Utils.applyAccent(col);
+        App.updateConfig('accentColor', col);
+        document.getElementById('s-accent').value = col;
+        document.querySelectorAll('.palette-dot').forEach(d => d.classList.remove('active'));
+        dot.classList.add('active');
+      });
+    });
+  },
+
+  _applyTheme(light) {
+    document.body.classList.toggle('light-theme', light);
+    const dark  = document.getElementById('theme-icon-dark');
+    const lgt   = document.getElementById('theme-icon-light');
+    if (dark) dark.classList.toggle('hidden', light);
+    if (lgt)  lgt.classList.toggle('hidden', !light);
+  },
+
+  // Extract 5 dominant colors from album art and show in titlebar palette
+  async _updatePalette(artworkDataUrl) {
+    const palette = document.getElementById('topbar-palette');
+    if (!palette) return;
+    if (!artworkDataUrl) { palette.style.display = 'none'; return; }
+
+    try {
+      const colors = await this._extractPaletteColors(artworkDataUrl, 5);
+      const dots = palette.querySelectorAll('.palette-dot');
+      dots.forEach((dot, i) => {
+        dot.style.background = colors[i] || 'transparent';
+        dot.style.display = colors[i] ? '' : 'none';
+      });
+      palette.style.display = 'flex';
+    } catch(e) {
+      palette.style.display = 'none';
+    }
+  },
+
+  // Sample pixels from image to extract dominant colors
+  _extractPaletteColors(dataUrl, count = 5) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 80; canvas.height = 80;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, 80, 80);
+        const data = ctx.getImageData(0, 0, 80, 80).data;
+
+        // Sample colors and cluster them
+        const samples = [];
+        for (let i = 0; i < data.length; i += 16) {
+          const r = data[i], g = data[i+1], b = data[i+2];
+          // Skip near-black and near-white
+          const lum = 0.299*r + 0.587*g + 0.114*b;
+          if (lum < 20 || lum > 235) continue;
+          samples.push([r, g, b]);
+        }
+
+        // Simple spread: pick evenly spaced samples sorted by hue
+        samples.sort((a, b) => {
+          const hA = this._rgb2hue(...a), hB = this._rgb2hue(...b);
+          return hA - hB;
+        });
+
+        const step = Math.max(1, Math.floor(samples.length / count));
+        const colors = [];
+        for (let i = 0; i < count && i * step < samples.length; i++) {
+          const [r, g, b] = samples[i * step];
+          colors.push(`rgb(${r},${g},${b})`);
+        }
+        resolve(colors);
+      };
+      img.onerror = reject;
+      img.src = dataUrl;
+    });
+  },
+
+  _rgb2hue(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r,g,b), min = Math.min(r,g,b);
+    let h = 0;
+    if (max !== min) {
+      const d = max - min;
+      if      (max === r) h = ((g-b)/d + (g<b?6:0)) / 6;
+      else if (max === g) h = ((b-r)/d + 2) / 6;
+      else                h = ((r-g)/d + 4) / 6;
+    }
+    return h;
+  },
+
 };

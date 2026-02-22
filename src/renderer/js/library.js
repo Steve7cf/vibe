@@ -43,12 +43,32 @@ const Library = {
         const meta = await window.vibeAPI.readMetadata(p);
         meta.id      = Utils.uid();
         meta.addedAt = Date.now();
+        // If duration is 0 or missing, probe with Audio element
+        if (!meta.duration || meta.duration === 0) {
+          meta.duration = await this._probeDuration(`file://${p}`);
+        }
+        // If title still unknown, use filename
+        if (!meta.title || meta.title === 'Unknown' || meta.title === path) {
+          meta.title = p.split(/[\/]/).pop().replace(/\.[^.]+$/, '');
+        }
         this.tracks.push(meta);
         added.push(meta);
       } catch(e) { console.warn('[Library] meta fail', p); }
     }
     if (added.length) this.save();
     return added;
+  },
+
+  _probeDuration(url) {
+    return new Promise(resolve => {
+      const a = new Audio();
+      a.preload = 'metadata';
+      a.onloadedmetadata = () => { resolve(a.duration || 0); a.src = ''; };
+      a.onerror = () => { resolve(0); };
+      a.src = url;
+      // Timeout fallback
+      setTimeout(() => resolve(0), 5000);
+    });
   },
 
   async scanFolder(folder) {
@@ -261,4 +281,32 @@ const Library = {
     this.save();
     return pl;
   },
+
+  // ── BPM-aware queue sort ──────────────────────────────────────────
+  // Groups tracks by estimated energy/tempo (bitrate as proxy for BPM
+  // since actual BPM isn't in standard metadata). Sorts so adjacent
+  // tracks have the closest bitrate — smooth crossfades between similar
+  // energy songs, no jarring tempo clashes.
+  sortForCrossfade(tracks) {
+    if (!tracks || tracks.length < 2) return tracks;
+
+    // Estimate BPM from bitrate: higher bitrate ≈ denser audio ≈ higher energy.
+    // Group into energy buckets: low(0-128kbps), mid(128-256), high(256+)
+    const energy = t => {
+      const br = t.bitrate || 128;
+      if (br < 96)  return 0;
+      if (br < 160) return 1;
+      if (br < 256) return 2;
+      return 3;
+    };
+
+    // Sort by energy level so transitions stay in the same "zone"
+    // Within same energy, sort by bitrate for smooth gradient
+    return [...tracks].sort((a, b) => {
+      const ea = energy(a), eb = energy(b);
+      if (ea !== eb) return ea - eb;
+      return (a.bitrate || 128) - (b.bitrate || 128);
+    });
+  },
+
 };
