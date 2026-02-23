@@ -7,6 +7,7 @@ const UI = {
   query:   '',
   ctxId:   null,
   ctxPlId: null,
+  ctxSourceTracks: null,
   _scanBusy: false,
   _muteVol:  0.8,
   _muted:    false,
@@ -379,7 +380,14 @@ const UI = {
     document.addEventListener('click', () => menu.classList.add('hidden'));
     document.addEventListener('keydown', e => { if(e.key==='Escape') menu.classList.add('hidden'); });
     const T = () => Library.tracks.find(t => t.id === this.ctxId);
-    document.getElementById('ctx-play')?.addEventListener('click',   () => { const t=T(); if(t) Player.setQueue(Library.tracks, Library.tracks.indexOf(t)); });
+    document.getElementById('ctx-play')?.addEventListener('click',   () => {
+      const t = T();
+      if (!t) return;
+      // Use the source track list the context menu was opened from (preserves filtered/sorted order)
+      const sourceList = this.ctxSourceTracks?.length ? this.ctxSourceTracks : Library.tracks;
+      const idx = sourceList.findIndex(s => s.id === t.id);
+      Player.setQueue(sourceList, idx >= 0 ? idx : 0);
+    });
     document.getElementById('ctx-next')?.addEventListener('click',   () => { const t=T(); if(t) Player.playNext(t); });
     document.getElementById('ctx-queue')?.addEventListener('click',  () => { const t=T(); if(t) Player.addToQueue(t); });
     document.getElementById('ctx-pl')?.addEventListener('click',     () => { if(this.ctxId) this._addToPlModal(this.ctxId); });
@@ -443,11 +451,8 @@ const UI = {
   renderHome() {
     const view = document.getElementById('view-home');
     if (!view) return;
-    const all     = Library.tracks;
-    const recent  = Library.getRecentlyPlayed(12);
-    const popular = Library.getMostPlayed(12);
-    const added   = Library.getRecentlyAdded(12);
-    const has     = all.length > 0;
+    const all = Library.tracks;
+    const has = all.length > 0;
 
     const h    = new Date().getHours();
     const part = h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening';
@@ -470,18 +475,35 @@ const UI = {
 
     // ── Today Mix card ─────────────────────────────────────────────
     if (has) {
-      const mix  = App.getTodayMixTracks();
+      const mix = App.getTodayMixTracks();
       const arts = mix.filter(t => t.artwork).slice(0, 4);
       const artEl = arts.length >= 2
-        ? `<div class="today-mix-mosaic">${arts.map(t=>`<img src="${t.artwork}" alt="">`).join('')}</div>`
-        : `<div class="today-mix-icon">🎵</div>`;
+        ? `<div class="today-mix-mosaic">${arts.map(t => `<img src="${t.artwork}" alt="">`).join('')}</div>`
+        : `<div class="today-mix-icon">✦</div>`;
+
+      // Describe the vibe based on time of day
+      const vibeLabel = h < 6  ? 'Late Night Drift'
+        : h < 9  ? 'Morning Rise'
+        : h < 12 ? 'Morning Energy'
+        : h < 14 ? 'Midday Pulse'
+        : h < 17 ? 'Afternoon Flow'
+        : h < 20 ? 'Evening Session'
+        :          'Night Wind-Down';
+      const vibeDesc = h < 6  ? 'chill & low energy'
+        : h < 9  ? 'gentle, builds up'
+        : h < 12 ? 'upbeat, rising energy'
+        : h < 14 ? 'high energy & drive'
+        : h < 17 ? 'mixed vibes'
+        : h < 20 ? 'peak energy'
+        :          'slow & soulful';
+
       html += `
         <div class="today-mix-card" id="btn-today-mix">
           ${artEl}
           <div class="today-mix-info">
-            <div class="today-mix-label">Today's Mix</div>
-            <div class="today-mix-title">Your Daily Blend</div>
-            <div class="today-mix-sub">${mix.length} tracks picked for this ${part}</div>
+            <div class="today-mix-label">Today's Mix · ${vibeDesc}</div>
+            <div class="today-mix-title">${vibeLabel}</div>
+            <div class="today-mix-sub">${mix.length} tracks tuned to your ${part}</div>
           </div>
           <button class="today-mix-play-btn" title="Play Today Mix">
             <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="#000"/></svg>
@@ -498,10 +520,6 @@ const UI = {
           <small>MP3 · FLAC · WAV · OGG · M4A · and more</small>
         </div>`;
     }
-
-    if (recent.length)  html += this._homeSection('Recently Played', recent);
-    if (popular.length) html += this._homeSection('Most Played', popular, true);
-    if (added.length)   html += this._homeSection('Recently Added', added);
 
     if (has) {
       html += `<div class="home-section">
@@ -615,13 +633,26 @@ const UI = {
 
   _bindTrackRows(container) {
     container.querySelectorAll('.track-item').forEach(item => {
+      // Helper: get ordered track list from this container (preserves filtered/sorted order)
+      const getContainerTracks = () => {
+        const items = [...container.querySelectorAll('.track-item')];
+        const byId  = new Map(Library.tracks.map(t => [t.id, t]));
+        return items.map(el => byId.get(el.dataset.id)).filter(Boolean);
+      };
+
       item.addEventListener('dblclick', () => {
+        const tracks = getContainerTracks();
         const items  = [...container.querySelectorAll('.track-item')];
-        const tracks = items.map(el => Library.tracks.find(t=>t.id===el.dataset.id)).filter(Boolean);
         Player.setQueue(tracks, items.indexOf(item));
       });
-      item.querySelector('.add-next-btn')?.addEventListener('click',  e => { e.stopPropagation(); const t=Library.tracks.find(t=>t.id===item.dataset.id); if(t) Player.playNext(t); });
-      item.querySelector('.add-queue-btn')?.addEventListener('click', e => { e.stopPropagation(); const t=Library.tracks.find(t=>t.id===item.dataset.id); if(t) Player.addToQueue(t); });
+
+      // Store source list so ctx-menu "Play" uses the right context
+      item.addEventListener('contextmenu', () => {
+        this.ctxSourceTracks = getContainerTracks();
+      });
+
+      item.querySelector('.add-next-btn')?.addEventListener('click',  e => { e.stopPropagation(); const byId=new Map(Library.tracks.map(t=>[t.id,t])); const t=byId.get(item.dataset.id); if(t) Player.playNext(t); });
+      item.querySelector('.add-queue-btn')?.addEventListener('click', e => { e.stopPropagation(); const byId=new Map(Library.tracks.map(t=>[t.id,t])); const t=byId.get(item.dataset.id); if(t) Player.addToQueue(t); });
     });
   },
 
@@ -654,17 +685,109 @@ const UI = {
     const grid   = document.getElementById('pls-grid');
     const detail = document.getElementById('pl-detail');
     detail.classList.add('hidden'); grid.classList.remove('hidden');
-    if (!Library.playlists.length) { grid.innerHTML = this._empty('No playlists yet'); return; }
-    grid.innerHTML = `<div class="pls-grid">${Library.playlists.map(pl => {
-      const art = Library.getPlaylistTracks(pl.id).find(t=>t.artwork)?.artwork;
+
+    // Smart auto-playlists — always shown, always fresh
+    const smartPlaylists = [
+      {
+        id: '__liked__', name: 'Liked Songs', icon: '♥',
+        tracks: Library.getLiked(),
+        color: '#e8547a',
+      },
+      {
+        id: '__recent__', name: 'Recently Played', icon: '🕐',
+        tracks: Library.getRecentlyPlayed(50),
+        color: '#1db954',
+      },
+      {
+        id: '__popular__', name: 'Most Played', icon: '🔥',
+        tracks: Library.getMostPlayed(50),
+        color: '#f59e0b',
+      },
+      {
+        id: '__added__', name: 'Recently Added', icon: '✦',
+        tracks: Library.getRecentlyAdded(50),
+        color: '#6366f1',
+      },
+    ];
+
+    const smartCards = smartPlaylists.map(sp => {
+      const arts = sp.tracks.filter(t => t.artwork).slice(0, 4);
+      const coverHtml = arts.length >= 2
+        ? `<div class="pl-cov-mosaic">${arts.map(t => `<img src="${t.artwork}">`).join('')}</div>`
+        : arts.length === 1
+          ? `<div class="pl-cov"><img src="${arts[0].artwork}"></div>`
+          : `<div class="pl-cov pl-cov-icon" style="--pl-color:${sp.color}">${sp.icon}</div>`;
+      return `<div class="pl-card smart-pl" data-smart="${sp.id}">
+        ${coverHtml}
+        <div class="card-name">${sp.name}</div>
+        <div class="card-sub">${sp.tracks.length} tracks</div>
+      </div>`;
+    }).join('');
+
+    const userCards = Library.playlists.map(pl => {
+      const art = Library.getPlaylistTracks(pl.id).find(t => t.artwork)?.artwork;
       return `<div class="pl-card" data-id="${pl.id}">
-        <div class="pl-cov">${art?`<img src="${art}">`:'<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'}</div>
+        <div class="pl-cov">${art ? `<img src="${art}">` : '<svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>'}</div>
         <div class="card-name">${Utils.sanitize(pl.name)}</div>
         <div class="card-sub">${pl.tracks.length} tracks</div>
       </div>`;
-    }).join('')}</div>`;
-    grid.querySelectorAll('.pl-card').forEach(card => card.addEventListener('click', () => this._showPlDetail(card.dataset.id)));
+    }).join('');
+
+    grid.innerHTML = `
+      <div class="pls-section-hd">Smart Playlists</div>
+      <div class="pls-grid">${smartCards}</div>
+      ${Library.playlists.length ? `
+        <div class="pls-section-hd" style="margin-top:28px">My Playlists</div>
+        <div class="pls-grid">${userCards}</div>
+      ` : `<div class="pls-section-hd" style="margin-top:28px;opacity:.4">No playlists yet — create one from any track</div>`}
+    `;
+
+    // Smart playlist clicks — show inline detail with live data
+    grid.querySelectorAll('.smart-pl').forEach(card => {
+      card.addEventListener('click', () => {
+        const sp = smartPlaylists.find(s => s.id === card.dataset.smart);
+        if (sp) this._showSmartPlDetail(sp);
+      });
+    });
+
+    // User playlist clicks
+    grid.querySelectorAll('.pl-card:not(.smart-pl)').forEach(card =>
+      card.addEventListener('click', () => this._showPlDetail(card.dataset.id))
+    );
+
     this.renderSidebarPls();
+  },
+
+  _showSmartPlDetail(sp) {
+    document.getElementById('pls-grid').classList.add('hidden');
+    const detail = document.getElementById('pl-detail');
+    detail.classList.remove('hidden');
+
+    detail.querySelector('#pl-detail-content').innerHTML = `
+      <div class="view-header">
+        <h2>${sp.name}</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="accent-btn" id="spl-play">▶ Play All</button>
+          <button class="ghost-btn" id="spl-shuffle">⇄ Shuffle</button>
+        </div>
+      </div>
+      ${this._trackList(sp.tracks)}`;
+
+    this._bindTrackRows(detail);
+    document.getElementById('spl-play')?.addEventListener('click', () => {
+      if (sp.tracks.length) Player.setQueue(sp.tracks, 0);
+    });
+    document.getElementById('spl-shuffle')?.addEventListener('click', () => {
+      if (sp.tracks.length) {
+        const shuffled = [...sp.tracks].sort(() => Math.random() - 0.5);
+        Player.setQueue(shuffled, 0);
+      }
+    });
+    // Back button via the existing pl-back mechanism
+    detail.querySelector('#pl-back')?.addEventListener('click', () => {
+      detail.classList.add('hidden');
+      document.getElementById('pls-grid').classList.remove('hidden');
+    });
   },
 
   renderSidebarPls() {
@@ -746,6 +869,7 @@ const UI = {
         e.preventDefault();
         this.ctxId = item.dataset.id;
         this.ctxPlId = id;
+        this.ctxSourceTracks = Library.getPlaylistTracks(id);  // playlist's own tracks
         const menu = document.getElementById('ctx-menu');
         menu.style.left = Math.min(e.clientX, window.innerWidth-160)+'px';
         menu.style.top  = Math.min(e.clientY, window.innerHeight-200)+'px';
@@ -823,38 +947,31 @@ const UI = {
     // Shuffle indicator
     document.getElementById('np-shuffle')?.classList.toggle('active', Player.shuffle);
 
-    // Transparent strip — current + 5 upcoming tracks
-    const strip = document.getElementById('np-track-strip');
-    if (strip) {
-      const slice = Player.queue.slice(Player.currentIndex, Player.currentIndex + 6);
-      strip.innerHTML = slice.map((qt, i) =>
-        `<div class="np-t-track ${i===0?'active':''}" data-index="${Player.currentIndex+i}" title="${Utils.sanitize(qt.title||'?')}">
-          ${qt.artwork ? `<img src="${qt.artwork}" alt="">` : `<div class="np-t-track-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`}
-        </div>`
-      ).join('');
-      strip.querySelectorAll('.np-t-track').forEach(el =>
-        el.addEventListener('click', () => Player.playAt(parseInt(el.dataset.index)))
-      );
+    // Queue count badge
+    const countEl = document.getElementById('np-queue-count');
+    if (countEl) {
+      const remaining = Player.queue.length - Player.currentIndex - 1;
+      countEl.textContent = remaining > 0 ? `${remaining} tracks` : 'End of queue';
     }
 
-    // Up Next sidebar queue
+    // Up Next queue list
     const queueEl = document.getElementById('np-queue');
     if (queueEl) {
       queueEl.innerHTML = Player.queue.map((qt, i) => {
         const act = i === Player.currentIndex;
+        const title = Utils.sanitize(qt.title || (qt.path ? qt.path.split(/[/\\]/).pop().replace(/\.[^.]+$/, '') : '?'));
         return `<div class="np-qi ${act?'active':''}" data-index="${i}">
-          <div class="np-qi-art">${qt.artwork?`<img src="${qt.artwork}">`:''}</div>
+          <div class="np-qi-num">${i + 1}</div>
+          <div class="np-qi-art">${qt.artwork ? `<img src="${qt.artwork}" alt="">` : ''}</div>
           <div class="np-qi-info">
-            <div class="np-qi-title">${Utils.sanitize(qt.title||'?')}</div>
-            <div class="np-qi-artist">${Utils.sanitize(qt.artist||'')}</div>
+            <div class="np-qi-title">${title}</div>
+            <div class="np-qi-artist">${Utils.sanitize(qt.artist || '')}</div>
           </div>
-          <div class="np-qi-num">${i+1}</div>
         </div>`;
       }).join('');
       queueEl.querySelectorAll('.np-qi').forEach(el =>
         el.addEventListener('click', () => Player.playAt(parseInt(el.dataset.index)))
       );
-      // Scroll active item into view
       queueEl.querySelector('.np-qi.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
   },

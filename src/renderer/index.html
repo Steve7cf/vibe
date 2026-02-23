@@ -254,6 +254,38 @@
             <div class="shortcut-row"><span>Repeat</span><kbd>Ctrl R</kbd></div>
           </div>
         </div>
+
+        <!-- About / Ownership tile -->
+        <div class="settings-sec about-tile">
+          <div class="about-inner">
+            <div class="about-logo">
+              <svg viewBox="0 0 36 36" fill="none">
+                <circle cx="18" cy="18" r="17" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="3 2.5"/>
+                <circle cx="18" cy="18" r="6" fill="var(--accent)" opacity=".9"/>
+                <circle cx="18" cy="18" r="2.5" fill="#000"/>
+              </svg>
+            </div>
+            <div class="about-info">
+              <div class="about-app">Vibe <span class="about-version">v1.0</span></div>
+              <div class="about-tagline">A music player that feels right</div>
+            </div>
+          </div>
+          <div class="about-credits">
+            <div class="about-credit-row">
+              <span class="about-credit-label">Author</span>
+              <span class="about-credit-val">Steve Bazaar</span>
+            </div>
+            <div class="about-credit-row">
+              <span class="about-credit-label">Contact</span>
+              <a class="about-credit-link" href="mailto:stevebazaar99@gmail.com">stevebazaar99@gmail.com</a>
+            </div>
+            <div class="about-credit-row">
+              <span class="about-credit-label">Built with</span>
+              <span class="about-credit-val">Electron · Web Audio API</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </main>
@@ -359,50 +391,89 @@
 
 <!-- ─── NOW PLAYING FULLSCREEN ────────────────────────────────────── -->
 <div id="now-playing" class="hidden">
+  <!-- Blurred backdrop -->
   <div id="np-bg"></div>
-  <div class="np-inner">
-    <button class="np-close" id="np-close"><svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg></button>
+
+  <!-- Top bar: close button -->
+  <div class="np-topbar">
+    <button class="np-close" id="np-close">
+      <svg viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"/></svg>
+      <span>Now Playing</span>
+    </button>
+  </div>
+
+  <!-- Main 2-column layout -->
+  <div class="np-body">
+
+    <!-- LEFT: art + info + controls -->
     <div class="np-left">
+
+      <!-- Album art -->
       <div class="np-art-wrap">
         <div class="np-art" id="np-art"></div>
-        <div class="np-art-glow"></div>
+        <div class="np-art-shadow"></div>
       </div>
-      <!-- Transparent queue thumbnail strip -->
-      <div class="np-transparent-tracks" id="np-track-strip"></div>
+
+      <!-- Track info -->
       <div class="np-track-info">
         <div class="np-title"  id="np-title">—</div>
         <div class="np-artist" id="np-artist"></div>
         <div class="np-album"  id="np-album"></div>
       </div>
-      <div class="np-controls">
-        <button class="np-btn" id="np-like">♡</button>
-        <button class="np-btn" id="np-prev"><svg viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
-        <button class="np-btn play" id="np-play">
-          <svg id="np-play-icon"  viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
-          <svg id="np-pause-icon" viewBox="0 0 24 24" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+
+      <!-- Like + shuffle row -->
+      <div class="np-meta-row">
+        <button class="np-icon-btn" id="np-like" title="Like">
+          <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
         </button>
-        <button class="np-btn" id="np-next"><svg viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
-        <button class="np-btn" id="np-shuffle"><svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg></button>
+        <button class="np-icon-btn" id="np-shuffle" title="Shuffle">
+          <svg viewBox="0 0 24 24"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+        </button>
       </div>
+
+      <!-- Seek bar -->
       <div class="np-seek-row">
         <span id="np-cur">0:00</span>
-        <div class="np-seek-wrap">
-          <div class="np-seek-bar" id="np-seek-bar">
-            <div class="np-seek-fill" id="np-seek-fill"></div>
-          </div>
+        <div class="np-seek-wrap" id="np-seek-bar">
+          <div class="np-seek-track"></div>
+          <div class="np-seek-fill" id="np-seek-fill"></div>
+          <div class="np-seek-thumb"></div>
         </div>
         <span id="np-dur">0:00</span>
       </div>
-      <div class="np-vol-row">
-        <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>
-        <input type="range" id="np-vol" min="0" max="1" step="0.01" value="0.8">
-        <svg viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+
+      <!-- Transport controls -->
+      <div class="np-controls">
+        <button class="np-ctrl" id="np-prev" title="Previous">
+          <svg viewBox="0 0 24 24"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+        </button>
+        <button class="np-play-btn" id="np-play" title="Play / Pause">
+          <svg id="np-play-icon"  viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3" fill="currentColor"/></svg>
+          <svg id="np-pause-icon" viewBox="0 0 24 24" class="hidden"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+        </button>
+        <button class="np-ctrl" id="np-next" title="Next">
+          <svg viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+        </button>
       </div>
+
+      <!-- Volume -->
+      <div class="np-vol-row">
+        <svg viewBox="0 0 24 24" class="np-vol-icon"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>
+        <input type="range" id="np-vol" min="0" max="1" step="0.01" value="0.8" class="np-vol-slider">
+        <svg viewBox="0 0 24 24" class="np-vol-icon"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+      </div>
+
     </div>
+
+    <!-- RIGHT: queue -->
     <div class="np-right">
-      <div class="np-queue-hd">Up Next</div>
+      <div class="np-queue-hd">
+        <span>Up Next</span>
+        <span class="np-queue-count" id="np-queue-count"></span>
+      </div>
       <div class="np-queue" id="np-queue"></div>
     </div>
+
   </div>
 </div>
 

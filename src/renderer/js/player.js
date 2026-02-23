@@ -13,8 +13,7 @@ const Player = {
   stopAfterCurrent: false,
   _crossfadeActive: false,
   _crossfadeAt: 0,
-  _pendingNextTrack: null,
-  _pendingNextIndex: -1,
+  _xfadeToIndex: -1,   // queue index we are crossfading into
   _sleepTimer: null,
   _tickLast: 0,
 
@@ -169,7 +168,21 @@ const Player = {
     Utils.applyAccent(hex || App.config.accentColor || '#1db954');
   },
 
-  _onEnded() { if (this._crossfadeActive) return; if (this.stopAfterCurrent) { this.stopAfterCurrent = false; this.stop(); const el = document.getElementById('s-stop-after'); if (el) el.checked = false; } else { this.next(); } },
+  _onEnded() {
+    if (this._crossfadeActive) return;
+    if (this.stopAfterCurrent) {
+      this.stopAfterCurrent = false; this.stop();
+      const el = document.getElementById('s-stop-after'); if (el) el.checked = false;
+      return;
+    }
+    // If only one song in queue (or no next song), stop — don't loop randomly
+    const hasNext = this.currentIndex + 1 < this.queue.length;
+    if (!hasNext) {
+      if (this.repeat === 'all') { this._play(0); return; }
+      this.stop(); return;
+    }
+    this.next();
+  },
   _onError() { console.warn('[Player] error on', this.currentTrack?.path); setTimeout(() => this.next(), 900); },
 
   _onMeta() {
@@ -206,49 +219,45 @@ const Player = {
     // gaplessOffset = how many seconds the two songs overlap (the crossfade window)
     const xfadeSec = Math.max(1, AudioEngine.config.gaplessOffset || 20);
 
-    // Stage next track into buffer well before we need it (only when crossfade is on)
+    // Pre-buffer next track well ahead of crossfade
     if (AudioEngine.config.gapless && rem < xfadeSec + 60) AudioEngine.stageNext(next);
 
-    // Crossfade: fire once when remaining time hits the overlap window
+    // Only one song — nothing to cross into
+    if (this.queue.length <= 1) return;
+
+    // Fire crossfade when we enter the overlap window
     const cooldownOk = (Date.now() - this._crossfadeAt) > (xfadeSec + 5) * 1000;
     if (AudioEngine.config.gapless && !this._crossfadeActive && cooldownOk && rem <= xfadeSec && rem > 0.5) {
-      this._crossfadeActive  = true;
-      this._crossfadeAt      = Date.now();
-      // Snapshot the exact next track object right now — no index math later
-      this._pendingNextIndex = this.currentIndex + 1;
-      this._pendingNextTrack = this.queue[this._pendingNextIndex];
-
-      // Pre-buffer the song after that
-      const afterNext = this.queue[this._pendingNextIndex + 1];
-      if (afterNext) AudioEngine.stageNext(afterNext);
-
+      this._crossfadeActive = true;
+      this._crossfadeAt     = Date.now();
+      // Remember exactly which index we're crossing into — don't mutate currentIndex yet
+      this._xfadeToIndex    = this.currentIndex + 1;
       AudioEngine.startCrossfade(xfadeSec);
     }
   },
 
   _onCrossfadeDone() {
+    // Audio slot has flipped. Advance to the track we were fading into.
     this._crossfadeActive = false;
 
-    // Use the exact track object + index we snapshotted at crossfade trigger time
-    const incoming  = this._pendingNextTrack;
-    const incomingIdx = this._pendingNextIndex;
-    this._pendingNextTrack = null;
-    this._pendingNextIndex = -1;
-    if (!incoming) return;
+    const idx = this._xfadeToIndex;
+    this._xfadeToIndex = -1;
 
-    // Apply state atomically — both index and track from the same snapshot
-    this.currentIndex = incomingIdx;
-    this.currentTrack = incoming;
-    Library.recordPlay(incoming.id);
+    // Guard: index must still be valid (user might have changed queue)
+    if (idx < 0 || idx >= this.queue.length) return;
+
+    this.currentIndex = idx;
+    this.currentTrack = this.queue[idx];   // read directly from queue — single source of truth
+    Library.recordPlay(this.currentTrack.id);
 
     this._updateUI();
     this._applyAlbumColor();
     UI.highlightActive();
     UI.syncNowPlaying();
-    UI._updatePalette(incoming.artwork || null);
-    if (App?.config?.notifications) window.vibeAPI.notifyTrack(incoming);
+    UI._updatePalette(this.currentTrack.artwork || null);
+    if (App?.config?.notifications) window.vibeAPI.notifyTrack(this.currentTrack);
 
-    // Read duration from new audio slot now that the flip is done
+    // Refresh duration display from new audio slot
     const dur = AudioEngine.duration;
     if (dur) {
       const tt = document.getElementById('time-tot'); if (tt) tt.textContent = Utils.formatTime(dur);

@@ -134,65 +134,177 @@ const Library = {
   },
 
   // ── Today Mix ─────────────────────────────────────────────────────────────
-  // Smart daily playlist: recency + frequency + liked + time-of-day mood + genre variety
-  getTodayMix(count = 10) {
+  // BPM/vibe-aware daily blend:
+  //   • Uses duration as tempo proxy (short ≈ fast/upbeat, long ≈ slow/mellow)
+  //   • Uses sampleRate as fidelity/energy proxy (44.1k=standard, 48k+=high energy)
+  //   • Selects tracks that match time-of-day vibe
+  //   • Orders result as an energy arc (morning: gentle→energetic, evening: energetic→chill)
+  // ─── BPM-proxy energy estimate ───────────────────────────────────
+  // We don't have actual BPM from ID3 tags, but we can build a solid
+  // proxy from the combination of: bitrate, duration, sample rate,
+  // genre keywords, and title/filename keywords.
+  _trackEnergy(t) {
+    let e = 1.0;  // neutral baseline (0=dead slow, 2=peak energy)
+
+    // ── Bitrate: compressed loud music (EDM, rock) has high bitrate ──
+    const br = t.bitrate || 128;
+    if      (br >= 320) e += 0.5;
+    else if (br >= 256) e += 0.35;
+    else if (br >= 192) e += 0.15;
+    else if (br <= 96)  e -= 0.3;   // low bitrate = often ambient/podcast
+
+    // ── Duration: dance tracks tend to be 3-4min, ambient 5-10min ──
+    const dur = t.duration || 210;
+    if      (dur < 120) e += 0.3;   // very short = upbeat single/clip
+    else if (dur < 200) e += 0.2;   // typical pop/dance
+    else if (dur < 270) e += 0.0;   // average
+    else if (dur < 360) e -= 0.15;  // longer = slower
+    else                e -= 0.4;   // 6+ min = ambient/classical/live
+
+    // ── Sample rate: 48kHz+ often indicates modern mastered-for-loudness ──
+    const sr = t.sampleRate || 44100;
+    if (sr >= 48000) e += 0.1;
+
+    // ── Genre keywords ──
+    const g = (t.genre || '').toLowerCase();
+    const highE = ['edm','electronic','dance','techno','house','drum','bass','metal','punk','hip hop','hip-hop','rap','funk','disco','hardstyle','trance','dubstep','rave','workout','gym','upbeat','energetic'];
+    const lowE  = ['ambient','classical','acoustic','sleep','meditation','chill','lo-fi','lofi','lo fi','jazz','blues','folk','country','ballad','slow','relaxing','piano','orchestral','new age'];
+    if (highE.some(k => g.includes(k))) e += 0.5;
+    if (lowE.some(k => g.includes(k)))  e -= 0.5;
+
+    // ── Title/filename keywords ──
+    const title = (t.title || t.path || '').toLowerCase();
+    const highT = ['remix','mix','club','rave','party','banger','workout','pump','hype','anthem','drop','bass','beat','bpm'];
+    const lowT  = ['acoustic','unplugged','slow','ballad','piano','sleep','rain','night','quiet','soft','gentle','instrumental'];
+    if (highT.some(k => title.includes(k))) e += 0.25;
+    if (lowT.some(k => title.includes(k)))  e -= 0.25;
+
+    return Math.max(0, Math.min(2, e));  // clamp 0–2
+  },
+
+  getTodayMix(count = 20) {
     if (!this.tracks.length) return [];
-    if (this.tracks.length <= count) return this._shuffled([...this.tracks]);
+    if (this.tracks.length <= count) return this._vibeSort([...this.tracks]);
 
     const now  = Date.now();
     const hour = new Date().getHours();
 
-    // Mood genre preferences by time of day
-    const moodGenres = hour < 10
-      ? ['acoustic', 'folk', 'jazz', 'classical', 'ambient', 'indie']
-      : hour < 18
-        ? ['pop', 'rock', 'hip hop', 'electronic', 'r&b', 'dance', 'funk']
-        : ['r&b', 'soul', 'jazz', 'lo-fi', 'indie', 'alternative', 'chill'];
+    // ── Time-of-day vibe profile ──────────────────────────────────
+    // targetEnergy: 0=chill, 1=medium, 2=energetic
+    // arc: 'up'=build energy, 'down'=wind down, 'wave'=peaks & valleys
+    const vibe =
+      hour < 6  ? { energy: 0.2, arc: 'flat',  label: 'late night',
+                    genres: ['ambient','lo-fi','lofi','chill','sleep','jazz','classical'] }
+    : hour < 9  ? { energy: 1.0, arc: 'up',    label: 'morning',
+                    genres: ['acoustic','folk','indie','pop','coffee','jazz','singer'] }
+    : hour < 12 ? { energy: 1.5, arc: 'up',    label: 'morning boost',
+                    genres: ['pop','rock','indie','funk','hip hop','electronic'] }
+    : hour < 14 ? { energy: 1.8, arc: 'flat',  label: 'midday',
+                    genres: ['pop','rock','hip hop','electronic','dance','funk','r&b'] }
+    : hour < 17 ? { energy: 1.3, arc: 'wave',  label: 'afternoon',
+                    genres: ['pop','indie','alternative','r&b','soul','hip hop'] }
+    : hour < 20 ? { energy: 1.7, arc: 'wave',  label: 'evening',
+                    genres: ['rock','hip hop','electronic','dance','pop','funk'] }
+    :             { energy: 0.7, arc: 'down',  label: 'night',
+                    genres: ['r&b','soul','jazz','lo-fi','indie','chill','blues','neo soul'] };
 
+    // ── Score every track ─────────────────────────────────────────
     const scored = this.tracks.map(t => {
-      let score = Math.random() * 28;   // controlled randomness
+      let score = Math.random() * 15;  // small random jitter so mix varies daily
 
+      // Recency — recent favourites but not just-played
       const days = (now - (this.lastPlayedAt[t.id] || 0)) / 86400000;
-      if      (days < 0.1) score -= 55; // played very recently — suppress
-      else if (days < 1)   score += 35; // played today (not last hour)
-      else if (days < 7)   score += 18; // this week
-      else if (days < 30)  score += 6;  // this month
-      else                 score -= 4;  // stale
+      if      (days < 0.08) score -= 80;  // played in last 2h — strong suppress
+      else if (days < 1)    score += 25;  // played today but not recently
+      else if (days < 4)    score += 18;  // last few days
+      else if (days < 14)   score += 10;  // this fortnight
+      else if (days > 90)   score -=  8;  // very neglected
 
-      // Popularity
-      score += Math.min((this.playCount[t.id] || 0) * 3, 28);
+      // Popularity boost
+      score += Math.min((this.playCount[t.id] || 0) * 5, 35);
 
-      // Liked
-      if (this.likedIds.has(t.id)) score += 22;
+      // Liked = always in the mix
+      if (this.likedIds.has(t.id)) score += 30;
 
-      // Mood match
+      // Genre match
       const g = (t.genre || '').toLowerCase();
-      if (moodGenres.some(m => g.includes(m))) score += 18;
+      const genreMatch = vibe.genres.some(m => g.includes(m));
+      if (genreMatch) score += 22;
 
-      return { track: t, score };
+      // Energy match — core of the vibe algorithm
+      const energy = this._trackEnergy(t);
+      const diff   = Math.abs(energy - vibe.energy);
+      score += (2 - diff) * 12;   // max +24 for perfect energy match
+
+      return { track: t, score, energy };
     });
 
     scored.sort((a, b) => b.score - a.score);
 
-    // Genre variety: max 3 per genre from top-30 pool
-    const pool = scored.slice(0, Math.min(30, scored.length));
-    const mix = [];
-    const usedGenres = {};
+    // ── Pick top tracks with artist + genre variety ───────────────
+    const pool      = scored.slice(0, Math.min(60, scored.length));
+    const mix       = [];
+    const usedArtist = {};
+    const usedGenre  = {};
 
-    for (const { track: t } of pool) {
+    for (const { track: t, energy } of pool) {
       if (mix.length >= count) break;
-      const g = (t.genre || 'unknown').toLowerCase();
-      if ((usedGenres[g] || 0) >= 3) continue;
-      usedGenres[g] = (usedGenres[g] || 0) + 1;
-      mix.push(t);
+      const artist = (t.artist || 'unknown').toLowerCase().slice(0, 20);
+      const genre  = (t.genre  || 'unknown').toLowerCase().slice(0, 12);
+      if ((usedArtist[artist] || 0) >= 2) continue;  // max 2 per artist
+      if ((usedGenre[genre]   || 0) >= 3) continue;  // max 3 per genre
+      usedArtist[artist] = (usedArtist[artist] || 0) + 1;
+      usedGenre[genre]   = (usedGenre[genre]   || 0) + 1;
+      mix.push({ track: t, energy });
     }
-    // Fill gaps
-    for (const { track: t } of pool) {
+    // Fill remaining slots if variety was too strict
+    for (const item of pool) {
       if (mix.length >= count) break;
-      if (!mix.includes(t)) mix.push(t);
+      if (!mix.find(m => m.track === item.track)) mix.push(item);
     }
 
-    return this._shuffled(mix);
+    // ── Order by energy arc ───────────────────────────────────────
+    return this._arcSort(mix.map(m => m.track), mix.map(m => m.energy), vibe.arc);
+  },
+
+  // Sort tracks to flow as an energy arc
+  _arcSort(tracks, energies, arc) {
+    const pairs = tracks.map((t, i) => ({ track: t, energy: energies[i] }));
+    if (arc === 'up')   { pairs.sort((a, b) => a.energy - b.energy); return pairs.map(p => p.track); }
+    if (arc === 'down') { pairs.sort((a, b) => b.energy - a.energy); return pairs.map(p => p.track); }
+    if (arc === 'wave') {
+      // Build-peak-decay: low → high → low (mountain shape)
+      pairs.sort((a, b) => a.energy - b.energy);
+      const n = pairs.length;
+      const result = new Array(n);
+      let lo = 0, hi = n - 1;
+      for (let i = 0; i < n; i++) {
+        // Fill from outside in, alternating — creates a wave that peaks in the middle
+        if (i % 2 === 0) result[i] = pairs[lo++];
+        else             result[n - 1 - Math.floor(i / 2)] = pairs[hi--];
+      }
+      // Actually do proper mountain: sort low→high, then rearrange as valley-peak-valley
+      pairs.sort((a, b) => a.energy - b.energy);
+      const mid = Math.ceil(n / 2);
+      return [...pairs.slice(0, mid), ...pairs.slice(mid).reverse()].map(p => p.track);
+    }
+    // flat: interleave high/low energy so variance is low throughout
+    pairs.sort((a, b) => a.energy - b.energy);
+    const result = [];
+    let lo = 0, hi = pairs.length - 1;
+    let turn = 0;
+    while (lo <= hi) {
+      result.push(turn % 2 === 0 ? pairs[lo++] : pairs[hi--]);
+      turn++;
+    }
+    return result.map(p => p.track);
+  },
+
+  _vibeSort(tracks) {
+    const hour = new Date().getHours();
+    const arc  = hour < 9 ? 'up' : hour >= 20 ? 'down' : 'flat';
+    const energies = tracks.map(t => this._trackEnergy(t));
+    return this._arcSort(tracks, energies, arc);
   },
 
   _shuffled(arr) {
