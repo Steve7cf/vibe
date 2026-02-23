@@ -1,170 +1,190 @@
-# 🎵 Vibe — Professional Desktop Music Player
+<div align="center">
 
-A modern, feature-rich desktop music player built with Electron, inspired by Spotify's aesthetic.
+<br/>
+
+<img src="https://img.shields.io/badge/version-1.0.6-1db954?style=for-the-badge&labelColor=0a0a0a" alt="Version"/>
+<img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-1db954?style=for-the-badge&labelColor=0a0a0a" alt="Platform"/>
+<img src="https://img.shields.io/badge/built%20with-Electron-1db954?style=for-the-badge&labelColor=0a0a0a" alt="Electron"/>
+<img src="https://img.shields.io/badge/license-MIT-1db954?style=for-the-badge&labelColor=0a0a0a" alt="License"/>
+
+<br/><br/>
+
+# ◉ Vibe
+
+### A music player that feels right.
+
+_Gapless crossfade · Smart daily mix · Clean dark UI · No streaming · Your music, your way._
+
+<br/>
+
+</div>
 
 ---
 
-## Prerequisites
+## ✦ Features
 
-- Node.js v18+ (https://nodejs.org)
-- npm v8+
-- Linux (tested on Ubuntu 22.04+)
+**Gapless Crossfade**
+Songs blend into each other seamlessly. Configurable overlap window — no silence, no hard cuts. The crossfade engine runs dual audio elements with Web Audio API gain ramping so both tracks play simultaneously during the transition.
+
+**Today's Mix**
+A smart daily playlist that adapts to the time of day. Morning gets a gentle build-up, midday peaks high, evening waves, night winds down. The algorithm scores every track using bitrate, duration, genre keywords, title signals, play history, and liked status — then orders them into an energy arc.
+
+**Smart Playlists**
+Four auto-generated playlists that stay fresh automatically:
+
+- ♥ **Liked Songs** — everything you've hearted
+- ◷ **Recently Played** — your listening history
+- ↑ **Most Played** — your all-time favourites
+- ✦ **Recently Added** — newest tracks in your library
+
+**Now Playing Screen**
+Full-screen overlay with blurred album art backdrop, animated breathing album art, seek bar with scrubbing thumb, transport controls, volume slider, and an Up Next queue panel.
+
+**Smart Queue**
+The queue reflects exactly what you played — play from Most Played and only those tracks queue up. Play from a playlist and only that playlist queues. No surprise all-library dumps.
+
+**Visualizer**
+Four modes: Bars · Wave · Circle · Particles. Synced to the Web Audio API analyser in real time.
+
+**Equalizer**
+10-band EQ with presets: Flat, Bass Boost, Vocal Clarity, Electronic, Classical, and more.
+
+**Delete from Disk**
+Right-click any track → Delete from Disk moves it to the OS trash (recoverable).
 
 ---
 
-## Quick Start
+## ⬇ Installation
+
+### Linux (Debian / Ubuntu)
 
 ```bash
-# 1. Navigate into the project
+sudo dpkg -i vibe_1.0.6_amd64.deb
+```
+
+### Windows
+
+Download `vibe_1.0.6_Setup.exe` from the [Releases](../../releases) page and run the installer.
+
+### Build from Source
+
+```bash
+git clone https://github.com/Steve7cf/vibe.git
 cd vibe
-
-# 2. Install dependencies
 npm install
-
-# 3. Run in development mode
 npm start
-
-# Or with dev tools:
-npm run dev
 ```
+
+**Requirements:** Node.js 18+ · Electron 28+
 
 ---
 
-## Package for Distribution
+## 🎵 Supported Formats
 
-```bash
-# Build AppImage + .deb for Linux
-npm run build
-
-# Output is in /dist/
-```
+| Format     | Extension      |
+| ---------- | -------------- |
+| MP3        | `.mp3`         |
+| FLAC       | `.flac`        |
+| WAV        | `.wav`         |
+| OGG Vorbis | `.ogg`         |
+| AAC / M4A  | `.m4a`, `.aac` |
+| OPUS       | `.opus`        |
+| WMA        | `.wma`         |
 
 ---
 
-## Project Structure
+## 🖥 Screenshots
+
+> Coming soon — add your screenshots to `docs/screenshots/` and reference them here.
+
+---
+
+## 🏗 Tech Stack
+
+| Layer        | Technology                                             |
+| ------------ | ------------------------------------------------------ |
+| Shell        | Electron 28                                            |
+| Audio engine | Web Audio API — dual AudioElement + GainNode crossfade |
+| Metadata     | music-metadata + Audio element duration probe fallback |
+| UI           | Vanilla JS + CSS custom properties — zero framework    |
+| Storage      | electron-store (JSON persistence)                      |
+| Build        | electron-builder                                       |
+
+---
+
+## 📁 Project Structure
 
 ```
 vibe/
-├── package.json
 ├── src/
 │   ├── main/
-│   │   ├── main.js          # Electron main process (IPC, tray, shortcuts)
-│   │   └── preload.js       # Secure context bridge
+│   │   ├── main.js          # Electron main process
+│   │   └── preload.js       # IPC bridge
 │   └── renderer/
 │       ├── index.html       # App shell
-│       ├── css/
-│       │   └── main.css     # All styles (dark theme, animations)
-│       └── js/
-│           ├── utils.js     # Helpers (formatTime, toast, modal)
-│           ├── library.js   # Track/playlist management, metadata
-│           ├── audio.js     # Web Audio API engine (EQ, effects)
-│           ├── equalizer.js # EQ bands UI + presets
-│           ├── visualizer.js# Canvas visualizer (bars/wave/circle)
-│           ├── player.js    # Playback state (shuffle/repeat/queue)
-│           ├── ui.js        # All view rendering & DOM events
-│           └── app.js       # Bootstrap, config, global events
+│       ├── js/
+│       │   ├── app.js       # Config, init, Today Mix scheduling
+│       │   ├── player.js    # Playback, queue, crossfade
+│       │   ├── audio.js     # Web Audio engine, EQ, visualizer
+│       │   ├── library.js   # Track store, smart playlists, scoring
+│       │   └── ui.js        # All rendering and event binding
+│       └── css/
+│           └── main.css     # Full design system
+├── package.json
+└── README.md
 ```
 
 ---
 
-## Features
+## 🚀 Build for Release
 
-### Playback
-- Play, Pause, Stop, Next, Previous
-- Seek bar with time display
-- Shuffle, Repeat (off / all / one)
-- Volume control + mute
-- Crossfade between tracks
-- Fade in / fade out
-- Playback speed control (0.5x – 2x)
-- Balance (L/R panning)
-- Replay gain toggle
+```bash
+# Linux .deb
+npx electron-builder --linux deb
 
-### Audio Engine
-- 10-band parametric equalizer
-- EQ presets: Flat, Pop, Rock, Jazz, Classical, Electronic, Hip Hop, Bass Boost, Treble Boost, Vocal
-- Bass boost filter
-- Stereo panning (surround simulation)
-- Web Audio API based processing chain
+# Windows .exe
+npx electron-builder --windows nsis
 
-### Library
-- Add files via dialog or drag-and-drop
-- Scan entire folders recursively
-- ID3/FLAC/OGG metadata reading (via music-metadata)
-- Album artwork extraction and display
-- Browse by: All Tracks, Artists, Albums, Genres
-- Full-text search
-- Recently played tracks
+# Both (via GitHub Actions on tag push)
+git tag -a v1.0.7 -m "Release v1.0.7"
+git push origin v1.0.7
+```
 
-### Playlists & Queue
-- Create, delete, rename playlists
-- Export playlists to M3U
-- Import M3U playlists
-- Queue management (add, remove, reorder)
-- Smart shuffle
-
-### Interface
-- Clean dark theme (Spotify-inspired, original design)
-- Sidebar navigation
-- Canvas visualizer (Bars / Wave / Circle)
-- Responsive to window resize
-- Context right-click menu
-- Track info popup
-- System tray integration
-- Minimizes to tray (close button hides window)
-
-### System Integration
-- Global media hotkeys (MediaPlay, MediaNext, MediaPrev, MediaStop)
-- System notifications on track change
-- Last session restore (restores track + position on launch)
-- Sleep timer (stops playback after N minutes)
-
-### Keyboard Shortcuts
-| Key | Action |
-|-----|--------|
-| Space | Play / Pause |
-| Ctrl+→ | Next Track |
-| Ctrl+← | Previous Track |
-| → | Seek +5s |
-| ← | Seek -5s |
-| ↑ | Volume Up |
-| ↓ | Volume Down |
-| M | Mute/Unmute |
-| Ctrl+S | Toggle Shuffle |
-| Ctrl+R | Cycle Repeat |
+See `.github/workflows/build.yml` for the automated CI/CD pipeline.
 
 ---
 
-## Supported Formats
+## 🤝 Contributing
 
-MP3, WAV, FLAC, OGG, M4A, AAC, WMA, OPUS
+```bash
+# Branch off develop
+git checkout -b feature/your-feature develop
 
----
+# Commit your changes
+git commit -m "feat: describe what you built"
 
-## Configuration
+# Push and open a PR → develop
+git push origin feature/your-feature
+```
 
-Config stored at: `~/.config/vibe/config.json`  
-Library stored at: `~/.config/vibe/library.json`
-
----
-
-## Future Improvements
-
-1. **Gapless playback** — pre-buffer next track via dual AudioBufferSourceNode
-2. **Lyrics** — integrate LRCLIB.net API for synced LRC lyrics
-3. **Mini player window** — separate frameless BrowserWindow
-4. **Pitch shifting** — use SoundTouchJS or a dedicated WASM processor
-5. **Last.fm scrobbling** — track listening history
-6. **MusicBrainz metadata lookup** — fetch missing artwork/metadata online
-7. **Waveform display** — pre-render waveform from audio buffer
-8. **Podcast support** — RSS feed parsing
-9. **Theme editor** — full CSS variable theming UI
-10. **Audio device selection** — Electron does not expose direct OS device routing without native modules; use `electron-audio-device` or OS-level routing
+PRs are merged into `develop`. Releases are cut from `main`.
 
 ---
 
-## Notes
+## 📄 License
 
-- On first launch, the tray icon may show as a blank icon. Production builds should include a proper 32x32 PNG icon at `src/assets/icon.png`.
-- The `music-metadata` package reads file metadata asynchronously and is the most reliable cross-format library for Node.js.
-- For FLAC/OGG on some systems, ensure the system audio codecs support these formats (usually handled by Chromium's built-in decoder in Electron).
+MIT — do what you want, keep the credit.
+
+---
+
+<div align="center">
+
+Made with care by **Steve Bazaar**
+
+[stevebazaar99@gmail.com](mailto:stevebazaar99@gmail.com)
+
+<br/>
+
+_If Vibe hits different, leave a ⭐_
+
+</div>
