@@ -19,6 +19,7 @@ const AudioEngine = {
   _elB: null, _gainB: null, _srcB: null,
   _cur: 'A',          // which slot is "active" / current
   _crossfading: false,
+  _stopped: false,        // true after stop() — forces reload on next play()
 
   config: {
     volume: 0.8, balance: 0, speed: 1,
@@ -119,6 +120,7 @@ const AudioEngine = {
     if (!track?.path) return;
     this._ensureCtx();
     this._crossfading = false;
+    this._stopped = false;
 
     // Stop & silence the background slot (don't clear src — just pause + zero gain)
     this._nxtEl.pause();
@@ -139,6 +141,19 @@ const AudioEngine = {
   async play() {
     this._ensureCtx();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
+    // After stop(), the element is at position 0 but paused with no pending decode.
+    // We must call load() again so the browser re-queues the media for playback.
+    if (this._stopped && this._curEl.src) {
+      this._stopped = false;
+      this._curEl.load();
+      // Wait for enough data before playing to avoid silence gap
+      await new Promise(res => {
+        if (this._curEl.readyState >= 3) { res(); return; }
+        this._curEl.addEventListener('canplay', res, { once: true });
+        setTimeout(res, 1500); // fallback
+      });
+    }
+    this._stopped = false;
     try { await this._curEl.play(); } catch(e) { console.warn('[play]', e); }
   },
 
@@ -241,6 +256,7 @@ const AudioEngine = {
 
   stop() {
     this._crossfading = false;
+    this._stopped = true;
     this._curEl?.pause();
     this._nxtEl?.pause();
     if (this._curEl)  this._curEl.currentTime  = 0;

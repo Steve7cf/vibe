@@ -403,127 +403,147 @@ svg { stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stro
 /* ═══════════════════════════════════════════════════════
    PLAYER BAR — redesigned for space, clarity, UX
    ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════
+   PLAYER BAR v2 — thick centered progress, clean controls
+   ═══════════════════════════════════════════════════════ */
 #player-bar {
   display:flex; flex-direction:column;
-  padding:0; background:var(--pb-bg, rgba(10,10,10,.98));
-  border-top:1px solid var(--border);
-  backdrop-filter:blur(32px) saturate(1.4);
+  padding:0;
+  background:rgba(10,10,10,.97);
+  border-top:1px solid rgba(255,255,255,.07);
+  backdrop-filter:blur(40px) saturate(1.5);
   flex-shrink:0; z-index:50;
+  /* subtle top glow line */
+  box-shadow:0 -1px 0 rgba(var(--accent-rgb),.12);
 }
 
-/* ── Top: full-width seek strip ──────────────────────── */
-.pb-seek-row {
-  display:flex; align-items:center; gap:14px;
-  padding:12px 28px 4px;
-  width:100%; box-sizing:border-box;
-}
-.pb-time {
-  font-size:11.5px; color:var(--text-3); font-variant-numeric:tabular-nums;
-  white-space:nowrap; min-width:34px; flex-shrink:0;
-  font-weight:500; letter-spacing:.3px;
-}
-.pb-time-r { text-align:right; }
-.pb-seek-wrap {
-  flex:1; position:relative; height:20px;
-  display:flex; align-items:center; cursor:pointer;
-}
-.pb-seek-bg {
-  position:absolute; left:0; right:0; height:4px;
-  background:rgba(255,255,255,.1); border-radius:4px;
-}
-.pb-seek-fill {
-  position:absolute; left:0; height:4px;
-  background:var(--accent); border-radius:4px;
-  transition:width .1s linear; pointer-events:none;
-  width:0%;
-}
-.pb-seek-thumb {
-  position:absolute; top:50%; width:14px; height:14px;
-  border-radius:50%; background:#fff; margin-left:-7px;
-  transform:translateY(-50%) scale(0);
-  transition:transform .15s var(--ease);
-  pointer-events:none; box-shadow:0 1px 4px rgba(0,0,0,.5);
-}
-.pb-seek-wrap:hover .pb-seek-thumb { transform:translateY(-50%) scale(1); }
-.pb-seek-wrap:hover .pb-seek-bg { background:rgba(255,255,255,.18); }
-.pb-seek-wrap:hover .pb-seek-fill { filter:brightness(1.15); }
-
-/* ── Main row ────────────────────────────────────────── */
+/* ── Main row ─────────────────────────────────────────── */
 .pb-main {
   display:flex; align-items:center;
-  padding:10px 28px 14px; gap:0;
+  padding:12px 24px 16px; gap:0;
 }
 
 /* ── LEFT: art + info ────────────────────────────────── */
 .player-left {
-  display:flex; align-items:center; gap:14px;
-  width:300px; min-width:0; flex-shrink:0;
+  display:flex; align-items:center; gap:12px;
+  width:280px; min-width:0; flex-shrink:0;
 }
 .player-art {
-  width:52px; height:52px; border-radius:10px; overflow:hidden;
+  width:50px; height:50px; border-radius:10px; overflow:hidden;
   background:var(--bg-2); flex-shrink:0;
-  box-shadow:0 4px 16px rgba(0,0,0,.5);
+  box-shadow:0 4px 20px rgba(0,0,0,.55);
+  transition:box-shadow .3s;
 }
+.player-art:hover { box-shadow:0 6px 28px rgba(0,0,0,.7); }
 .player-art img, .player-art .art-ph { width:100%; height:100%; object-fit:cover; }
 .player-info { min-width:0; flex:1; }
-.player-title  { font-size:14px; font-weight:600; color:var(--text-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.3; }
-.player-artist { font-size:12.5px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:3px; }
+.player-title  { font-size:13.5px; font-weight:600; color:var(--text-1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.35; }
+.player-artist { font-size:12px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
 
 /* Icon buttons in player bar */
 .pb-icon-btn {
-  width:36px; height:36px; border-radius:50%;
+  width:34px; height:34px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   color:var(--text-3); transition:var(--t); flex-shrink:0;
   background:transparent;
 }
-.pb-icon-btn svg { width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-.pb-icon-btn:hover { color:var(--text-1); background:rgba(255,255,255,.08); }
+.pb-icon-btn svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.pb-icon-btn:hover { color:var(--text-1); background:rgba(255,255,255,.09); }
 .pb-icon-btn.active { color:var(--accent); }
 #btn-like svg { transition:fill .15s, color .15s; }
 #btn-like.liked { color:var(--accent); }
 #btn-like.liked svg { fill:var(--accent); }
 
-/* ── CENTER: transport ───────────────────────────────── */
-.player-center { flex:1; display:flex; justify-content:center; }
-.pb-controls { display:flex; align-items:center; gap:6px; }
+/* ── CENTER: controls + progress ─────────────────────── */
+.player-center {
+  flex:1; display:flex; flex-direction:column;
+  align-items:center; gap:10px; padding:0 24px;
+}
+
+/* Transport buttons row */
+.pb-controls { display:flex; align-items:center; gap:4px; }
 
 .pb-ctrl-sm {
-  width:38px; height:38px; border-radius:50%;
+  width:36px; height:36px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   color:var(--text-3); transition:var(--t);
 }
-.pb-ctrl-sm svg { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-.pb-ctrl-sm:hover { color:var(--text-1); background:rgba(255,255,255,.08); }
+.pb-ctrl-sm svg { width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.pb-ctrl-sm:hover { color:var(--text-1); background:rgba(255,255,255,.09); }
 .pb-ctrl-sm.active { color:var(--accent); }
 
 .pb-ctrl {
-  width:44px; height:44px; border-radius:50%;
+  width:42px; height:42px; border-radius:50%;
   display:flex; align-items:center; justify-content:center;
   color:var(--text-2); transition:var(--t);
 }
-.pb-ctrl svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
-.pb-ctrl:hover { color:var(--text-1); background:rgba(255,255,255,.1); }
+.pb-ctrl svg { width:19px; height:19px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.pb-ctrl:hover { color:var(--text-1); background:rgba(255,255,255,.09); }
 
+/* Play button — accent filled pill */
 .pb-play {
-  width:54px; height:54px; border-radius:50%;
-  background:var(--text-1); color:#000;
+  width:50px; height:50px; border-radius:50%;
+  background:var(--accent);
+  color:#000;
   display:flex; align-items:center; justify-content:center;
-  transition:transform .15s var(--ease), box-shadow .15s;
-  box-shadow:0 4px 20px rgba(0,0,0,.4);
-  flex-shrink:0; margin:0 4px;
+  transition:transform .15s var(--ease), box-shadow .15s, background .2s;
+  box-shadow:0 4px 22px rgba(var(--accent-rgb),.45);
+  flex-shrink:0; margin:0 6px;
 }
-.pb-play svg { width:20px; height:20px; stroke:none; fill:currentColor; }
-.pb-play:hover { transform:scale(1.08); box-shadow:0 6px 28px rgba(0,0,0,.5); }
-.pb-play:active { transform:scale(.96); }
+.pb-play svg { width:19px; height:19px; stroke:none; fill:currentColor; }
+.pb-play:hover { transform:scale(1.09); box-shadow:0 6px 30px rgba(var(--accent-rgb),.6); }
+.pb-play:active { transform:scale(.95); }
 
-/* ── RIGHT: volume + extras ──────────────────────────── */
+/* Progress row: time + THICK seek bar + time */
+.pb-progress-row {
+  display:flex; align-items:center; gap:12px;
+  width:100%; max-width:560px;
+}
+
+.pb-time {
+  font-size:11px; color:var(--text-3); font-variant-numeric:tabular-nums;
+  white-space:nowrap; min-width:32px; flex-shrink:0;
+  font-weight:500; letter-spacing:.2px;
+}
+.pb-time-r { text-align:right; }
+
+/* The seek bar — thick, satisfying, easy to click */
+.pb-seek-wrap {
+  flex:1; position:relative; height:28px;
+  display:flex; align-items:center; cursor:pointer;
+}
+.pb-seek-bg {
+  position:absolute; left:0; right:0; height:6px;
+  background:rgba(255,255,255,.1); border-radius:6px;
+  transition:height .15s, background .15s;
+}
+.pb-seek-fill {
+  position:absolute; left:0; height:6px;
+  background:var(--accent); border-radius:6px;
+  pointer-events:none; width:0%;
+  transition:height .15s;
+}
+.pb-seek-thumb {
+  position:absolute; top:50%; width:16px; height:16px;
+  border-radius:50%; background:#fff; margin-left:-8px;
+  transform:translateY(-50%) scale(0);
+  transition:transform .12s var(--ease);
+  pointer-events:none;
+  box-shadow:0 1px 6px rgba(0,0,0,.6);
+}
+/* Hover: bar grows taller, thumb appears, fill brightens */
+.pb-seek-wrap:hover .pb-seek-bg   { height:8px; background:rgba(255,255,255,.18); }
+.pb-seek-wrap:hover .pb-seek-fill { height:8px; filter:brightness(1.1); }
+.pb-seek-wrap:hover .pb-seek-thumb { transform:translateY(-50%) scale(1); }
+
+/* ── RIGHT: volume + stop + speed ────────────────────── */
 .player-right {
-  display:flex; align-items:center; gap:8px;
-  width:300px; justify-content:flex-end; flex-shrink:0;
+  display:flex; align-items:center; gap:6px;
+  width:280px; justify-content:flex-end; flex-shrink:0;
 }
 .pb-vol { display:flex; align-items:center; gap:8px; }
 .pb-vol-slider-wrap {
-  position:relative; width:90px; height:20px;
+  position:relative; width:80px; height:20px;
   display:flex; align-items:center;
 }
 .pb-vol-slider-wrap input[type=range] {
@@ -533,21 +553,21 @@ svg { stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stro
   position:relative; z-index:2;
 }
 .pb-vol-slider-wrap input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance:none; width:14px; height:14px;
+  -webkit-appearance:none; width:13px; height:13px;
   border-radius:50%; background:#fff; cursor:pointer;
   box-shadow:0 1px 4px rgba(0,0,0,.4);
 }
 .pb-speed-btn {
-  font-size:12px; font-weight:700; color:var(--text-3);
-  padding:0 10px; width:auto; border-radius:6px;
-  background:rgba(255,255,255,.06); border:1px solid var(--border);
-  height:32px; letter-spacing:.3px;
+  font-size:11.5px; font-weight:700; color:var(--text-3);
+  padding:0 9px; width:auto; border-radius:6px;
+  background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.09);
+  height:30px; letter-spacing:.3px;
 }
-.pb-speed-btn:hover { color:var(--text-1); background:rgba(255,255,255,.12); }
+.pb-speed-btn:hover { color:var(--text-1); background:rgba(255,255,255,.11); }
 
-/* ── Legacy aliases so JS selectors still work ───────── */
-#seek-fill  { /* mapped to .pb-seek-fill */ }
-#seek-thumb { /* mapped to .pb-seek-thumb */ }
+/* legacy ID aliases — JS still targets #seek-fill, #seek-thumb */
+#seek-fill  {}
+#seek-thumb {}
 
 input[type=range] {
   -webkit-appearance:none; height:3px; background:rgba(255,255,255,.14); border-radius:2px; outline:none; cursor:pointer;
@@ -1336,7 +1356,7 @@ body.light-theme .track-dur { color:var(--text-3); }
 body.light-theme .track-album { color:var(--text-3); }
 
 /* Seek & progress */
-body.light-theme .pb-seek-bg { background:rgba(60,50,40,.14); }
+body.light-theme .pb-seek-bg { background:rgba(60,50,40,.15); }
 body.light-theme .pb-vol-slider-wrap input[type=range] { background:rgba(60,50,40,.14); }
 
 /* Controls */
@@ -1431,3 +1451,15 @@ body.light-theme .toast { background:var(--text-1); color:#f0ede8; }
 .setting-row-top { display:flex; align-items:center; justify-content:space-between; width:100%; }
 .setting-row--col { flex-direction:column; align-items:flex-start; gap:6px; }
 
+
+/* ── Virtual list & lazy loading ──────────────────────────────────────────── */
+.load-sentinel { height: 1px; pointer-events: none; }
+
+img.lazy-img {
+  display: block;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+img.lazy-img[src] { opacity: 1; }

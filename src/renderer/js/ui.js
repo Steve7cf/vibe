@@ -155,17 +155,19 @@ const UI = {
     try {
       const dirs = await window.vibeAPI.openFolder();
       if (!dirs?.length) return;
-      Utils.toast('Scanning…');
-      let total = 0;
+      Utils.toast('Scanning folders…');
       for (const d of dirs) {
-        const tracks = await Library.scanFolder(d);
-        total += tracks.length;
         if (!App.config.folders) App.config.folders = [];
         if (!App.config.folders.includes(d)) App.config.folders.push(d);
       }
       App.save();
+      // Incremental scan — only reads metadata for new/changed files
+      const result = await Library.scanFolders(App.config.folders);
       this.renderHome(); this.renderLibrary(this.libTab); this._renderLibFolders();
-      Utils.toast(`Found ${total} track${total !== 1 ? 's' : ''} ✓`);
+      const msg = result.added
+        ? `Found ${result.added} new track${result.added!==1?'s':''} ✓`
+        : 'Library up to date ✓';
+      Utils.toast(msg);
     } finally { this._scanBusy = false; }
   },
 
@@ -260,7 +262,6 @@ const UI = {
         if (fx) fx(v); App.updateConfig(key, v);
       });
     };
-    b('s-crossfade','crossfade', parseFloat, v => { document.getElementById('s-crossfade-val').textContent = v+'s'; AudioEngine.config.crossfade = v; });
     b('s-fadein',  'fadeIn',    null, v => { AudioEngine.config.fadeIn  = v; });
     b('s-fadeout', 'fadeOut',   null, v => { AudioEngine.config.fadeOut = v; });
     b('s-speed',   'speed',     parseFloat, v => { document.getElementById('s-speed-val').textContent = parseFloat(v).toFixed(2)+'×'; AudioEngine.setSpeed(parseFloat(v)); });
@@ -533,6 +534,7 @@ const UI = {
 
     view.innerHTML = html;
     this._bindTrackRows(view);
+    this._activateLazy(view, all);
     this.highlightActive();
 
     // Wire play button (it sits inside the delegated #view-home area but needs stopPropagation)
@@ -570,7 +572,7 @@ const UI = {
     const c = document.getElementById('lib-content');
     if (!c) return;
     const tracks = q ? Library.search(q) : Library.tracks;
-    if      (tab === 'all')     { c.innerHTML = this._trackList(tracks); this._bindTrackRows(c); }
+    if      (tab === 'all')     { c.innerHTML = this._trackList(tracks); this._bindTrackRows(c); this._activateLazy(c, tracks); }
     else if (tab === 'artists') this._renderGroupGrid(c, Library.getByArtist(), 'artist');
     else if (tab === 'albums')  this._renderGroupGrid(c, Library.getByAlbum(),  'album');
     else if (tab === 'genres')  this._renderGroupGrid(c, Library.getByGenre(),  'genre');
@@ -600,35 +602,104 @@ const UI = {
   },
 
   // ══════════════════════════════════════════════════════════════════
-  // TRACK LIST
+  // TRACK LIST — virtual paging + lazy artwork
+  // Renders first 200 rows immediately. A sentinel div at the bottom
+  // triggers IntersectionObserver to append the next 200 on scroll.
+  // Artwork uses data-src — loaded only when the row scrolls into view.
+  // This keeps DOM count ~200 regardless of library size.
   // ══════════════════════════════════════════════════════════════════
-  _trackList(tracks) {
+  _rowHTML(t, i) {
+    const act = Player.currentTrack?.id === t.id;
+    // data-src instead of src — IntersectionObserver fills it in on scroll
+    const art = t.artwork
+      ? `<img data-src="${t.artwork}" alt="" class="lazy-img">`
+      : `<div class="art-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
+    const num = act && Player.isPlaying
+      ? `<div class="bars"><span></span><span></span><span></span></div>`
+      : i + 1;
+    return `<div class="track-item ${act?'active':''}" data-id="${t.id}" data-index="${i}">
+      <div class="track-num">${num}</div>
+      <div class="track-art-sm">${art}</div>
+      <div class="track-main">
+        <div class="track-name">${Utils.sanitize(t.title||(t.path?t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,''):'—'))}</div>
+        <div class="track-by">${Utils.sanitize(t.artist||'')}</div>
+      </div>
+      <div class="track-album">${Utils.sanitize(t.album||'—')}</div>
+      <div class="track-dur">${Utils.formatTime(t.duration)}</div>
+      <div class="track-actions">
+        <button class="track-action-btn add-next-btn"  data-id="${t.id}" title="Play Next">▷</button>
+        <button class="track-action-btn add-queue-btn" data-id="${t.id}" title="Queue">+</button>
+      </div>
+    </div>`;
+  },
+
+  _trackList(tracks, PAGE=200) {
     if (!tracks.length) return this._empty('No tracks');
     const hdr = `<div class="track-list-header">
       <span class="th-num">#</span><span></span>
       <span>Title</span><span class="th-album">Album</span>
       <span class="th-dur">Time</span><span></span>
     </div>`;
-    const rows = tracks.map((t, i) => {
-      const act = Player.currentTrack?.id === t.id;
-      const art = t.artwork ? `<img src="${t.artwork}" loading="lazy" alt="">` : `<div class="art-ph"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg></div>`;
-      const num = act && Player.isPlaying ? `<div class="bars"><span></span><span></span><span></span></div>` : i+1;
-      return `<div class="track-item ${act?'active':''}" data-id="${t.id}" data-index="${i}">
-        <div class="track-num">${num}</div>
-        <div class="track-art-sm">${art}</div>
-        <div class="track-main">
-          <div class="track-name">${Utils.sanitize(t.title || (t.path ? t.path.split(/[\\/]/).pop().replace(/\.[^.]+$/,'') : '—'))}</div>
-          <div class="track-by">${Utils.sanitize(t.artist || '')}</div>
-        </div>
-        <div class="track-album">${Utils.sanitize(t.album||'—')}</div>
-        <div class="track-dur">${Utils.formatTime(t.duration)}</div>
-        <div class="track-actions">
-          <button class="track-action-btn add-next-btn"  data-id="${t.id}" title="Play Next">▷</button>
-          <button class="track-action-btn add-queue-btn" data-id="${t.id}" title="Queue">+</button>
-        </div>
-      </div>`;
-    }).join('');
-    return `<div class="track-list">${hdr}<div class="track-rows">${rows}</div></div>`;
+    const rows   = tracks.slice(0, PAGE).map((t,i) => this._rowHTML(t,i)).join('');
+    const sentry = tracks.length > PAGE
+      ? `<div class="load-sentinel" data-offset="${PAGE}"></div>` : '';
+    return `<div class="track-list"><div class="tl-source" data-count="${tracks.length}"></div>${hdr}<div class="track-rows">${rows}${sentry}</div></div>`;
+  },
+
+  // Activate IntersectionObserver for lazy artwork + infinite scroll sentinel
+  _activateLazy(container, tracks) {
+    if (!container) return;
+    const PAGE = 200;
+
+    // ── Lazy artwork ────────────────────────────────────────────────
+    const imgObs = new IntersectionObserver((entries, obs) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const img = e.target;
+        if (img.dataset.src) { img.src = img.dataset.src; delete img.dataset.src; }
+        obs.unobserve(img);
+      }
+    }, { rootMargin: '300px' });
+
+    const observeImages = (root) =>
+      root.querySelectorAll('img.lazy-img[data-src]').forEach(img => imgObs.observe(img));
+    observeImages(container);
+
+    // ── Infinite scroll ─────────────────────────────────────────────
+    const attachSentinel = (sentinel) => {
+      if (!sentinel) return;
+      const scrollObs = new IntersectionObserver(entries => {
+        if (!entries[0].isIntersecting) return;
+        scrollObs.disconnect();
+        const offset = parseInt(sentinel.dataset.offset) || 0;
+        const slice  = tracks.slice(offset, offset + PAGE);
+        if (!slice.length) { sentinel.remove(); return; }
+
+        const rowsEl = sentinel.parentElement;
+        sentinel.remove();
+
+        const frag = document.createDocumentFragment();
+        const tmp  = document.createElement('div');
+        tmp.innerHTML = slice.map((t,i) => this._rowHTML(t, offset+i)).join('');
+        while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+
+        const newOffset = offset + PAGE;
+        if (newOffset < tracks.length) {
+          const ns = document.createElement('div');
+          ns.className = 'load-sentinel'; ns.dataset.offset = newOffset;
+          frag.appendChild(ns);
+        }
+        rowsEl.appendChild(frag);
+
+        // Bind events on newly added rows
+        this._bindTrackRows(container);
+        observeImages(container);
+        if (newOffset < tracks.length) attachSentinel(rowsEl.querySelector('.load-sentinel'));
+      }, { rootMargin: '400px' });
+      scrollObs.observe(sentinel);
+    };
+
+    attachSentinel(container.querySelector('.load-sentinel'));
   },
 
   _bindTrackRows(container) {
@@ -686,29 +757,35 @@ const UI = {
     const detail = document.getElementById('pl-detail');
     detail.classList.add('hidden'); grid.classList.remove('hidden');
 
-    // Smart auto-playlists — always shown, always fresh
+    // Smart auto-playlists — only shown when they have actual data
+    // Counts reflect reality: Recently Played = tracks you've actually played,
+    // Most Played = tracks with play count > 0, etc.
     const smartPlaylists = [
       {
         id: '__liked__', name: 'Liked Songs', icon: '♥',
         tracks: Library.getLiked(),
         color: '#e8547a',
+        alwaysShow: true, // show even when empty so user knows it exists
       },
       {
         id: '__recent__', name: 'Recently Played', icon: '🕐',
-        tracks: Library.getRecentlyPlayed(50),
+        tracks: Library.getRecentlyPlayed(), // returns only actually-played tracks
         color: '#1db954',
+        alwaysShow: false,
       },
       {
         id: '__popular__', name: 'Most Played', icon: '🔥',
-        tracks: Library.getMostPlayed(50),
+        tracks: Library.getMostPlayed(), // returns only tracks with play count > 0
         color: '#f59e0b',
+        alwaysShow: false,
       },
       {
         id: '__added__', name: 'Recently Added', icon: '✦',
-        tracks: Library.getRecentlyAdded(50),
+        tracks: Library.getRecentlyAdded(), // returns only tracks with addedAt timestamp
         color: '#6366f1',
+        alwaysShow: true,
       },
-    ];
+    ].filter(sp => sp.alwaysShow || sp.tracks.length > 0);
 
     const smartCards = smartPlaylists.map(sp => {
       const arts = sp.tracks.filter(t => t.artwork).slice(0, 4);
@@ -717,10 +794,13 @@ const UI = {
         : arts.length === 1
           ? `<div class="pl-cov"><img src="${arts[0].artwork}"></div>`
           : `<div class="pl-cov pl-cov-icon" style="--pl-color:${sp.color}">${sp.icon}</div>`;
+      const subtitle = sp.tracks.length === 0
+        ? (sp.id === '__liked__' ? 'No liked songs yet' : 'Nothing yet')
+        : `${sp.tracks.length} track${sp.tracks.length !== 1 ? 's' : ''}`;
       return `<div class="pl-card smart-pl" data-smart="${sp.id}">
         ${coverHtml}
         <div class="card-name">${sp.name}</div>
-        <div class="card-sub">${sp.tracks.length} tracks</div>
+        <div class="card-sub">${subtitle}</div>
       </div>`;
     }).join('');
 
@@ -742,11 +822,10 @@ const UI = {
       ` : `<div class="pls-section-hd" style="margin-top:28px;opacity:.4">No playlists yet — create one from any track</div>`}
     `;
 
-    // Smart playlist clicks — show inline detail with live data
+    // Smart playlist clicks — re-fetch live data on open
     grid.querySelectorAll('.smart-pl').forEach(card => {
       card.addEventListener('click', () => {
-        const sp = smartPlaylists.find(s => s.id === card.dataset.smart);
-        if (sp) this._showSmartPlDetail(sp);
+        this._showSmartPlDetail(card.dataset.smart);
       });
     });
 
@@ -758,28 +837,51 @@ const UI = {
     this.renderSidebarPls();
   },
 
-  _showSmartPlDetail(sp) {
+  _showSmartPlDetail(spId) {
+    // Always re-fetch live data when opening the detail view
+    const liveTracks = {
+      '__liked__':   Library.getLiked(),
+      '__recent__':  Library.getRecentlyPlayed(),
+      '__popular__': Library.getMostPlayed(),
+      '__added__':   Library.getRecentlyAdded(),
+    }[spId] || [];
+
+    const spMeta = {
+      '__liked__':   { name: 'Liked Songs',      icon: '♥' },
+      '__recent__':  { name: 'Recently Played',   icon: '🕐' },
+      '__popular__': { name: 'Most Played',        icon: '🔥' },
+      '__added__':   { name: 'Recently Added',     icon: '✦' },
+    }[spId] || { name: 'Playlist', icon: '♫' };
+
     document.getElementById('pls-grid').classList.add('hidden');
     const detail = document.getElementById('pl-detail');
     detail.classList.remove('hidden');
 
+    const subtitle = liveTracks.length
+      ? `${liveTracks.length} track${liveTracks.length !== 1 ? 's' : ''}`
+      : 'No tracks yet';
+
     detail.querySelector('#pl-detail-content').innerHTML = `
       <div class="view-header">
-        <h2>${sp.name}</h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="accent-btn" id="spl-play">▶ Play All</button>
-          <button class="ghost-btn" id="spl-shuffle">⇄ Shuffle</button>
+        <h2>${spMeta.name}</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <span style="color:var(--text-3);font-size:13px">${subtitle}</span>
+          ${liveTracks.length ? `
+            <button class="accent-btn" id="spl-play">▶ Play All</button>
+            <button class="ghost-btn" id="spl-shuffle">⇄ Shuffle</button>
+          ` : ''}
         </div>
       </div>
-      ${this._trackList(sp.tracks)}`;
+      ${liveTracks.length ? this._trackList(liveTracks) : '<div class="empty-state"><p>Nothing here yet. Start listening!</p></div>'}`;
 
     this._bindTrackRows(detail);
+    this._activateLazy(detail, liveTracks);
     document.getElementById('spl-play')?.addEventListener('click', () => {
-      if (sp.tracks.length) Player.setQueue(sp.tracks, 0);
+      if (liveTracks.length) Player.setQueue(liveTracks, 0);
     });
     document.getElementById('spl-shuffle')?.addEventListener('click', () => {
-      if (sp.tracks.length) {
-        const shuffled = [...sp.tracks].sort(() => Math.random() - 0.5);
+      if (liveTracks.length) {
+        const shuffled = [...liveTracks].sort(() => Math.random() - 0.5);
         Player.setQueue(shuffled, 0);
       }
     });
@@ -1117,12 +1219,11 @@ const UI = {
       folders:        this._ob.prefs.scanFolders,
     });
 
-    // Scan chosen folders in background
+    // Scan chosen folders (incremental — fast even on re-runs)
     if (this._ob.prefs.scanFolders.length) {
       Utils.toast('Scanning music library…');
-      let total = 0;
-      for (const d of this._ob.prefs.scanFolders) { const t = await Library.scanFolder(d); total += t.length; }
-      Utils.toast(`Found ${total} track${total!==1?'s':''} ✓`);
+      const result = await Library.scanFolders(this._ob.prefs.scanFolders);
+      Utils.toast(`Found ${result.added} track${result.added!==1?'s':''} ✓`);
       this.renderHome(); this.renderLibrary('all');
     }
   },
@@ -1193,7 +1294,6 @@ const UI = {
     const setChk = (id,v)=>{const el=document.getElementById(id);if(el)el.checked=v;};
     const setTxt = (id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
     set('s-accent',    cfg.accentColor||'#1db954');
-    set('s-crossfade', cfg.crossfade??3);   setTxt('s-crossfade-val', `${cfg.crossfade??3}s`);
     set('s-speed',     cfg.speed??1);        setTxt('s-speed-val',     `${(cfg.speed||1).toFixed(2)}×`);
     set('s-balance',   cfg.balance??0);
     set('s-visualizer',cfg.visualizerMode||'bars');

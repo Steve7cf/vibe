@@ -294,17 +294,6 @@
               <div class="settings-sec">
                 <h3>Playback</h3>
                 <div class="setting-row">
-                  <label>Crossfade</label
-                  ><input
-                    type="range"
-                    id="s-crossfade"
-                    min="0"
-                    max="12"
-                    value="3"
-                    step="1"
-                  /><span id="s-crossfade-val">3s</span>
-                </div>
-                <div class="setting-row">
                   <label>Fade In on track start</label
                   ><label class="toggle-label"
                     ><input type="checkbox" id="s-fadein" checked /><span
@@ -619,7 +608,7 @@
                   </div>
                   <div class="about-info">
                     <div class="about-app">
-                      Vibe <span class="about-version">v1.0.6</span>
+                      Vibe <span class="about-version">v1.0.7</span>
                     </div>
                     <div class="about-tagline">
                       A music player that feels right
@@ -683,20 +672,9 @@
 
       <!-- ─── PLAYER BAR ────────────────────────────────────────────────── -->
       <div id="player-bar">
-        <!-- Seek bar runs full width at the very top of the bar -->
-        <div class="pb-seek-row">
-          <span id="time-cur" class="pb-time">0:00</span>
-          <div class="pb-seek-wrap" id="seek-bar">
-            <div class="pb-seek-bg"></div>
-            <div class="pb-seek-fill" id="seek-fill"></div>
-            <div class="pb-seek-thumb" id="seek-thumb"></div>
-          </div>
-          <span id="time-tot" class="pb-time pb-time-r">0:00</span>
-        </div>
-
-        <!-- Main row: left / center / right -->
+        <!-- ─── Main row: left / center / right ─── -->
         <div class="pb-main">
-          <!-- LEFT: art + track info + like -->
+          <!-- LEFT: album art + track info + like -->
           <div class="player-left">
             <div class="player-art" id="player-art">
               <div class="art-ph">
@@ -717,19 +695,27 @@
                 />
               </svg>
             </button>
-            <button
-              class="pb-icon-btn"
-              id="btn-open-np"
-              title="Expand now playing"
-            >
+            <button class="pb-icon-btn" id="btn-open-np" title="Now Playing">
               <svg viewBox="0 0 24 24">
                 <polyline points="18 15 12 9 6 15" />
               </svg>
             </button>
           </div>
 
-          <!-- CENTER: transport controls -->
+          <!-- CENTER: progress bar on top, controls below -->
           <div class="player-center">
+            <!-- Progress row: time + thick seek bar + time -->
+            <div class="pb-progress-row">
+              <span id="time-cur" class="pb-time">0:00</span>
+              <div class="pb-seek-wrap" id="seek-bar">
+                <div class="pb-seek-bg"></div>
+                <div class="pb-seek-fill" id="seek-fill"></div>
+                <div class="pb-seek-thumb" id="seek-thumb"></div>
+              </div>
+              <span id="time-tot" class="pb-time pb-time-r">0:00</span>
+            </div>
+
+            <!-- Transport row -->
             <div class="pb-controls">
               <button class="pb-ctrl-sm" id="btn-shuffle" title="Shuffle">
                 <svg viewBox="0 0 24 24">
@@ -771,7 +757,7 @@
             </div>
           </div>
 
-          <!-- RIGHT: volume + extras -->
+          <!-- RIGHT: volume + stop + speed -->
           <div class="player-right">
             <button class="pb-icon-btn" id="btn-stop" title="Stop">
               <svg viewBox="0 0 24 24">

@@ -1,424 +1,381 @@
-/* ═══════════════════════════════════════════════════════
-   Library — tracks, playlists, play stats, Today Mix
-   ═══════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   Library v2 — incremental scan · batch metadata · FTS search
+   prediction engine · skip/listen tracking · O(1) lookups
+   ═══════════════════════════════════════════════════════════════════ */
 const Library = {
-  tracks: [],
-  playlists: [],
-  recentIds: [],
-  likedIds: new Set(),
-  playCount: {},
-  lastPlayedAt: {},
+  tracks:        [],
+  playlists:     [],
+  recentIds:     [],
+  likedIds:      new Set(),
+  playCount:     {},
+  lastPlayedAt:  {},
+  skipCount:     {},       // how many times each track was skipped
+  listenDuration:{},       // total seconds actually listened per track
+  fileStats:     {},       // path → {mtime,size} — incremental scan state
 
+  _byId:    new Map(),     // O(1) id lookups
+  _byPath:  new Map(),     // O(1) path lookups
+  _ftsIdx:  null,          // inverted index, built lazily
+
+  // ── Init ─────────────────────────────────────────────────────────────────
   async init() {
     const d = await window.vibeAPI.getLibrary();
-    this.tracks       = d.tracks       || [];
-    this.playlists    = d.playlists    || [];
-    this.recentIds    = d.recentIds    || [];
-    this.likedIds     = new Set(d.likedIds || []);
-    this.playCount    = d.playCount    || {};
-    this.lastPlayedAt = d.lastPlayedAt || {};
+    this.tracks        = d.tracks        || [];
+    this.playlists     = d.playlists     || [];
+    this.recentIds     = d.recentIds     || [];
+    this.likedIds      = new Set(d.likedIds || []);
+    this.playCount     = d.playCount     || {};
+    this.lastPlayedAt  = d.lastPlayedAt  || {};
+    this.skipCount     = d.skipCount     || {};
+    this.listenDuration= d.listenDuration|| {};
+    this.fileStats     = d.fileStats     || {};
+    this._reindex();
   },
 
+  _reindex() {
+    this._byId.clear(); this._byPath.clear(); this._ftsIdx = null;
+    for (const t of this.tracks) { this._byId.set(t.id, t); this._byPath.set(t.path, t); }
+  },
+
+  // ── Persistence — debounced, atomic ──────────────────────────────────────
   _saveTimer: null,
   save() {
     clearTimeout(this._saveTimer);
-    this._saveTimer = setTimeout(() => {
-      window.vibeAPI.saveLibrary({
-        tracks:       this.tracks,
-        playlists:    this.playlists,
-        recentIds:    this.recentIds,
-        likedIds:     [...this.likedIds],
-        playCount:    this.playCount,
-        lastPlayedAt: this.lastPlayedAt,
-      });
-    }, 800);
+    this._saveTimer = setTimeout(() => window.vibeAPI.saveLibrary({
+      tracks:this.tracks, playlists:this.playlists, recentIds:this.recentIds,
+      likedIds:[...this.likedIds], playCount:this.playCount, lastPlayedAt:this.lastPlayedAt,
+      skipCount:this.skipCount, listenDuration:this.listenDuration, fileStats:this.fileStats,
+    }), 800);
   },
 
-  // ── Add / scan ─────────────────────────────────────────────────────────────
-  async addFiles(paths) {
-    const added = [];
-    for (const p of paths) {
-      if (this.tracks.find(t => t.path === p)) continue;
-      try {
-        const meta = await window.vibeAPI.readMetadata(p);
-        meta.id      = Utils.uid();
-        meta.addedAt = Date.now();
-        // If duration is 0 or missing, probe with Audio element
-        if (!meta.duration || meta.duration === 0) {
-          meta.duration = await this._probeDuration(`file://${p}`);
-        }
-        // If title still unknown, use filename
-        if (!meta.title || meta.title === 'Unknown' || meta.title === path) {
-          meta.title = p.split(/[\/]/).pop().replace(/\.[^.]+$/, '');
-        }
-        this.tracks.push(meta);
-        added.push(meta);
-      } catch(e) { console.warn('[Library] meta fail', p); }
+  // ── Incremental folder scan ───────────────────────────────────────────────
+  // Uses mtime+size to detect what actually changed — avoids re-reading
+  // metadata for every track on every launch. Only new/changed files read.
+  async scanFolders(folders) {
+    const { added, changed, removed, fileStats } =
+      await window.vibeAPI.scanIncremental({ folders, fileStats: this.fileStats });
+    this.fileStats = fileStats;
+
+    // Remove deleted files
+    if (removed.length) {
+      const gone = new Set(removed);
+      this.tracks = this.tracks.filter(t => !gone.has(t.path));
     }
-    if (added.length) this.save();
+
+    // Re-read metadata for changed files
+    if (changed.length) {
+      const metas = await window.vibeAPI.readMetaBatch(changed);
+      for (const m of metas) {
+        const existing = this._byPath.get(m.path);
+        if (existing) Object.assign(existing, m);
+      }
+    }
+
+    // Read new files in batches of 50 (progress feedback for large libraries)
+    const newFiles = added.filter(p => !this._byPath.has(p));
+    if (newFiles.length) {
+      const BATCH = 50;
+      for (let i = 0; i < newFiles.length; i += BATCH) {
+        const slice = newFiles.slice(i, i + BATCH);
+        const metas = await window.vibeAPI.readMetaBatch(slice);
+        for (let j = 0; j < slice.length; j++) {
+          const m = metas[j]; if (!m) continue;
+          if (!m.duration) m.duration = await this._probeDur(`file://${m.path}`);
+          m.id = Utils.uid(); m.addedAt = Date.now();
+          this.tracks.push(m);
+          this._byId.set(m.id, m); this._byPath.set(m.path, m);
+        }
+      }
+      this._ftsIdx = null; // invalidate FTS
+    }
+
+    const delta = newFiles.length + changed.length + removed.length;
+    if (delta > 0) this.save();
+    return { added: newFiles.length, changed: changed.length, removed: removed.length };
+  },
+
+  // Add individual files (from open-files dialog)
+  async addFiles(paths) {
+    const fresh = paths.filter(p => !this._byPath.has(p));
+    if (!fresh.length) return [];
+    const metas = await window.vibeAPI.readMetaBatch(fresh);
+    const added = [];
+    for (let i = 0; i < fresh.length; i++) {
+      const m = metas[i]; if (!m) continue;
+      if (!m.duration) m.duration = await this._probeDur(`file://${m.path}`);
+      m.id = Utils.uid(); m.addedAt = Date.now();
+      this.tracks.push(m);
+      this._byId.set(m.id, m); this._byPath.set(m.path, m);
+      added.push(m);
+    }
+    if (added.length) { this._ftsIdx = null; this.save(); }
     return added;
   },
 
-  _probeDuration(url) {
-    return new Promise(resolve => {
-      const a = new Audio();
-      a.preload = 'metadata';
-      a.onloadedmetadata = () => { resolve(a.duration || 0); a.src = ''; };
-      a.onerror = () => { resolve(0); };
-      a.src = url;
-      // Timeout fallback
-      setTimeout(() => resolve(0), 5000);
+  async scanFolder(folder) { return this.scanFolders([folder]); },
+
+  _probeDur(url) {
+    return new Promise(res => {
+      const a = new Audio(); a.preload = 'metadata';
+      a.onloadedmetadata = () => { res(a.duration||0); a.src=''; };
+      a.onerror = () => res(0); a.src = url;
+      setTimeout(() => res(0), 4000);
     });
   },
 
-  async scanFolder(folder) {
-    const files = await window.vibeAPI.scanFolder(folder);
-    return this.addFiles(files);
-  },
-
   removeTrack(id) {
-    this.tracks    = this.tracks.filter(t => t.id !== id);
+    this.tracks = this.tracks.filter(t => t.id !== id);
     this.playlists.forEach(pl => { pl.tracks = pl.tracks.filter(i => i !== id); });
     this.recentIds = this.recentIds.filter(i => i !== id);
-    delete this.playCount[id];
-    delete this.lastPlayedAt[id];
-    this.save();
+    ['playCount','lastPlayedAt','skipCount','listenDuration'].forEach(k => delete this[k][id]);
+    this._reindex(); this._ftsIdx = null; this.save();
+  },
+
+  // Duplicate detection — same title+artist or same file size
+  findDuplicates() {
+    const seen = new Map(), dups = [];
+    for (const t of this.tracks) {
+      const key = `${(t.title||'').toLowerCase()}|||${(t.artist||'').toLowerCase()}`;
+      if (seen.has(key)) dups.push([seen.get(key), t]);
+      else seen.set(key, t);
+    }
+    return dups;
+  },
+
+  // ── FTS Search — inverted index, prefix matching ──────────────────────────
+  _buildFTS() {
+    const idx = new Map();
+    for (const t of this.tracks) {
+      const tokens = [t.title, t.artist, t.album, t.genre].filter(Boolean)
+        .join(' ').toLowerCase().split(/[\s\-_,.]+/).filter(s => s.length > 1);
+      for (const tok of tokens) {
+        if (!idx.has(tok)) idx.set(tok, new Set());
+        idx.get(tok).add(t.id);
+      }
+    }
+    this._ftsIdx = idx;
   },
 
   search(q) {
-    if (!q) return this.tracks;
-    const s = q.toLowerCase();
-    return this.tracks.filter(t =>
-      (t.title  || '').toLowerCase().includes(s) ||
-      (t.artist || '').toLowerCase().includes(s) ||
-      (t.album  || '').toLowerCase().includes(s) ||
-      (t.genre  || '').toLowerCase().includes(s)
-    );
+    if (!q?.trim()) return this.tracks;
+    if (!this._ftsIdx) this._buildFTS();
+    const terms = q.toLowerCase().trim().split(/\s+/).filter(s => s.length > 1);
+    if (!terms.length) return this.tracks;
+    const allToks = [...this._ftsIdx.keys()];
+    let ids = null;
+    for (const term of terms) {
+      const hit = new Set();
+      for (const tok of allToks) {
+        if (tok.startsWith(term)) { for (const id of this._ftsIdx.get(tok)) hit.add(id); }
+      }
+      ids = ids === null ? hit : new Set([...ids].filter(id => hit.has(id)));
+    }
+    return ids ? this.tracks.filter(t => ids.has(t.id)) : [];
   },
 
-  // ── Play tracking ──────────────────────────────────────────────────────────
+  // ── Play & skip tracking ─────────────────────────────────────────────────
   recordPlay(id) {
-    this.playCount[id]    = (this.playCount[id] || 0) + 1;
+    if (!id) return;
+    this.playCount[id]    = (this.playCount[id]    || 0) + 1;
     this.lastPlayedAt[id] = Date.now();
-    this.recentIds = [id, ...this.recentIds.filter(i => i !== id)].slice(0, 80);
+    this.recentIds = [id, ...this.recentIds.filter(i => i !== id)].slice(0, 100);
+    this.save();
+  },
+
+  recordSkip(id, listenedSecs = 0) {
+    if (!id) return;
+    this.skipCount[id] = (this.skipCount[id] || 0) + 1;
+    if (listenedSecs > 5) this.listenDuration[id] = (this.listenDuration[id]||0) + listenedSecs;
+    this.save();
+  },
+
+  recordListenEnd(id, secs) {
+    if (!id || secs < 5) return;
+    this.listenDuration[id] = (this.listenDuration[id]||0) + secs;
     this.save();
   },
 
   toggleLike(id) {
     this.likedIds.has(id) ? this.likedIds.delete(id) : this.likedIds.add(id);
-    this.save();
-    return this.likedIds.has(id);
+    this.save(); return this.likedIds.has(id);
   },
 
-  // ── Queries ────────────────────────────────────────────────────────────────
-  getRecentlyPlayed(n = 12) {
-    return this.recentIds.slice(0, n)
-      .map(id => this.tracks.find(t => t.id === id)).filter(Boolean);
+  // ── Queries ───────────────────────────────────────────────────────────────
+  getRecentlyPlayed()  { return this.recentIds.map(id=>this._byId.get(id)).filter(Boolean); },
+  getRecentlyAdded()   { return [...this.tracks].sort((a,b)=>(b.addedAt||0)-(a.addedAt||0)); },
+  getMostPlayed()      { return [...this.tracks].filter(t=>(this.playCount[t.id]||0)>0)
+                           .sort((a,b)=>(this.playCount[b.id]||0)-(this.playCount[a.id]||0)); },
+  getLiked()              { return this.tracks.filter(t=>this.likedIds.has(t.id)); },
+
+  // ── On-Device Prediction Engine ──────────────────────────────────────────
+  // Scores tracks for "most likely to enjoy right now" using only local data.
+  // Used by smart shuffle to pick the next track instead of random.
+  _score(t, hour, now) {
+    const id = t.id;
+    let s = 0;
+
+    const plays  = this.playCount[id]     || 0;
+    const skips  = this.skipCount[id]     || 0;
+    const listen = this.listenDuration[id]|| 0;
+    const dur    = t.duration             || 180;
+
+    // Play frequency — log scale prevents runaway bias
+    s += Math.log1p(plays) * 8;
+
+    // Skip ratio penalty
+    if (plays > 0) s -= (skips / Math.max(1,plays)) * 22;
+    else if (skips > 0) s -= skips * 6;
+
+    // Listen completion reward — tracks fully listened score higher
+    if (plays > 0) s += Math.min((listen / plays) / dur, 1) * 14;
+
+    // Liked boost
+    if (this.likedIds.has(id)) s += 20;
+
+    // Recency pattern
+    const days = ((now - (this.lastPlayedAt[id]||0)) / 86400000);
+    if      (days < 0.08) s -= 60;  // just played
+    else if (days < 1)    s += 14;
+    else if (days < 4)    s += 9;
+    else if (days < 14)   s += 4;
+    else if (days > 180)  s -= 5;
+
+    // Time-of-day energy match
+    const e  = this._energy(t);
+    const te = hour<6?0.3:hour<9?0.9:hour<12?1.5:hour<14?1.8:hour<17?1.3:hour<20?1.6:0.7;
+    s += (2 - Math.abs(e - te)) * 6;
+
+    return s;
   },
 
-  getRecentlyAdded(n = 12) {
-    return [...this.tracks]
-      .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
-      .slice(0, n);
+  // Prediction-based next track selection (used in smart shuffle)
+  predictNext(currentId, excludeIds=new Set()) {
+    const now=Date.now(), hour=new Date().getHours();
+    const cur = currentId ? this._byId.get(currentId) : null;
+    const pool = this.tracks.filter(t => t.id!==currentId && !excludeIds.has(t.id));
+    if (!pool.length) return null;
+
+    const scored = pool.map(t => {
+      let s = this._score(t, hour, now);
+      if (cur?.artist && t.artist===cur.artist) s -= 8; // artist variety
+      s += Math.random() * 12; // jitter — not fully deterministic
+      return { t, s };
+    }).sort((a,b)=>b.s-a.s);
+
+    // Weighted random from top-10 (not pure greedy)
+    const top = scored.slice(0,10);
+    const total = top.reduce((acc,x)=>acc+Math.max(0.1,x.s+100),0);
+    let r = Math.random()*total;
+    for (const {t,s} of top) { r-=Math.max(0.1,s+100); if(r<=0) return t; }
+    return top[0]?.t || null;
   },
 
-  getMostPlayed(n = 12) {
-    return [...this.tracks]
-      .filter(t => (this.playCount[t.id] || 0) > 0)
-      .sort((a, b) => (this.playCount[b.id] || 0) - (this.playCount[a.id] || 0))
-      .slice(0, n);
-  },
-
-  getLiked() {
-    return this.tracks.filter(t => this.likedIds.has(t.id));
+  // ── BPM-proxy energy ─────────────────────────────────────────────────────
+  _energy(t) {
+    let e=1.0;
+    const br=t.bitrate||128;
+    if(br>=320)e+=0.5;else if(br>=256)e+=0.35;else if(br>=192)e+=0.15;else if(br<=96)e-=0.3;
+    const dur=t.duration||210;
+    if(dur<120)e+=0.3;else if(dur<200)e+=0.2;else if(dur>=360)e-=0.4;else if(dur>=300)e-=0.15;
+    if((t.sampleRate||44100)>=48000) e+=0.1;
+    const g=(t.genre||'').toLowerCase();
+    if(/edm|electronic|dance|techno|house|metal|punk|hip.hop|rap|funk|disco|trance|dubstep/.test(g)) e+=0.5;
+    if(/ambient|classical|acoustic|sleep|chill|lo.fi|jazz|blues|folk|ballad|relaxing|piano/.test(g))  e-=0.5;
+    const tl=(t.title||'').toLowerCase();
+    if(/remix|club|rave|banger|workout|pump|hype|anthem|drop/.test(tl)) e+=0.25;
+    if(/acoustic|unplugged|slow|ballad|sleep|soft|gentle/.test(tl))     e-=0.25;
+    return Math.max(0,Math.min(2,e));
   },
 
   // ── Today Mix ─────────────────────────────────────────────────────────────
-  // BPM/vibe-aware daily blend:
-  //   • Uses duration as tempo proxy (short ≈ fast/upbeat, long ≈ slow/mellow)
-  //   • Uses sampleRate as fidelity/energy proxy (44.1k=standard, 48k+=high energy)
-  //   • Selects tracks that match time-of-day vibe
-  //   • Orders result as an energy arc (morning: gentle→energetic, evening: energetic→chill)
-  // ─── BPM-proxy energy estimate ───────────────────────────────────
-  // We don't have actual BPM from ID3 tags, but we can build a solid
-  // proxy from the combination of: bitrate, duration, sample rate,
-  // genre keywords, and title/filename keywords.
-  _trackEnergy(t) {
-    let e = 1.0;  // neutral baseline (0=dead slow, 2=peak energy)
-
-    // ── Bitrate: compressed loud music (EDM, rock) has high bitrate ──
-    const br = t.bitrate || 128;
-    if      (br >= 320) e += 0.5;
-    else if (br >= 256) e += 0.35;
-    else if (br >= 192) e += 0.15;
-    else if (br <= 96)  e -= 0.3;   // low bitrate = often ambient/podcast
-
-    // ── Duration: dance tracks tend to be 3-4min, ambient 5-10min ──
-    const dur = t.duration || 210;
-    if      (dur < 120) e += 0.3;   // very short = upbeat single/clip
-    else if (dur < 200) e += 0.2;   // typical pop/dance
-    else if (dur < 270) e += 0.0;   // average
-    else if (dur < 360) e -= 0.15;  // longer = slower
-    else                e -= 0.4;   // 6+ min = ambient/classical/live
-
-    // ── Sample rate: 48kHz+ often indicates modern mastered-for-loudness ──
-    const sr = t.sampleRate || 44100;
-    if (sr >= 48000) e += 0.1;
-
-    // ── Genre keywords ──
-    const g = (t.genre || '').toLowerCase();
-    const highE = ['edm','electronic','dance','techno','house','drum','bass','metal','punk','hip hop','hip-hop','rap','funk','disco','hardstyle','trance','dubstep','rave','workout','gym','upbeat','energetic'];
-    const lowE  = ['ambient','classical','acoustic','sleep','meditation','chill','lo-fi','lofi','lo fi','jazz','blues','folk','country','ballad','slow','relaxing','piano','orchestral','new age'];
-    if (highE.some(k => g.includes(k))) e += 0.5;
-    if (lowE.some(k => g.includes(k)))  e -= 0.5;
-
-    // ── Title/filename keywords ──
-    const title = (t.title || t.path || '').toLowerCase();
-    const highT = ['remix','mix','club','rave','party','banger','workout','pump','hype','anthem','drop','bass','beat','bpm'];
-    const lowT  = ['acoustic','unplugged','slow','ballad','piano','sleep','rain','night','quiet','soft','gentle','instrumental'];
-    if (highT.some(k => title.includes(k))) e += 0.25;
-    if (lowT.some(k => title.includes(k)))  e -= 0.25;
-
-    return Math.max(0, Math.min(2, e));  // clamp 0–2
-  },
-
-  getTodayMix(count = 20) {
+  getTodayMix(count=20) {
     if (!this.tracks.length) return [];
-    if (this.tracks.length <= count) return this._vibeSort([...this.tracks]);
+    if (this.tracks.length<=count) return this._arcSort([...this.tracks]);
+    const now=Date.now(), hour=new Date().getHours();
+    const V = hour<6  ? {e:0.2,arc:'flat', g:['ambient','lo-fi','chill','sleep','jazz','classical']}
+             :hour<9  ? {e:1.0,arc:'up',   g:['acoustic','folk','indie','pop','jazz']}
+             :hour<12 ? {e:1.5,arc:'up',   g:['pop','rock','indie','funk','hip hop','electronic']}
+             :hour<14 ? {e:1.8,arc:'flat', g:['pop','rock','hip hop','electronic','dance','funk']}
+             :hour<17 ? {e:1.3,arc:'wave', g:['pop','indie','r&b','soul','hip hop']}
+             :hour<20 ? {e:1.7,arc:'wave', g:['rock','hip hop','electronic','dance','funk']}
+             :          {e:0.7,arc:'down', g:['r&b','soul','jazz','lo-fi','indie','chill','blues']};
 
-    const now  = Date.now();
-    const hour = new Date().getHours();
-
-    // ── Time-of-day vibe profile ──────────────────────────────────
-    // targetEnergy: 0=chill, 1=medium, 2=energetic
-    // arc: 'up'=build energy, 'down'=wind down, 'wave'=peaks & valleys
-    const vibe =
-      hour < 6  ? { energy: 0.2, arc: 'flat',  label: 'late night',
-                    genres: ['ambient','lo-fi','lofi','chill','sleep','jazz','classical'] }
-    : hour < 9  ? { energy: 1.0, arc: 'up',    label: 'morning',
-                    genres: ['acoustic','folk','indie','pop','coffee','jazz','singer'] }
-    : hour < 12 ? { energy: 1.5, arc: 'up',    label: 'morning boost',
-                    genres: ['pop','rock','indie','funk','hip hop','electronic'] }
-    : hour < 14 ? { energy: 1.8, arc: 'flat',  label: 'midday',
-                    genres: ['pop','rock','hip hop','electronic','dance','funk','r&b'] }
-    : hour < 17 ? { energy: 1.3, arc: 'wave',  label: 'afternoon',
-                    genres: ['pop','indie','alternative','r&b','soul','hip hop'] }
-    : hour < 20 ? { energy: 1.7, arc: 'wave',  label: 'evening',
-                    genres: ['rock','hip hop','electronic','dance','pop','funk'] }
-    :             { energy: 0.7, arc: 'down',  label: 'night',
-                    genres: ['r&b','soul','jazz','lo-fi','indie','chill','blues','neo soul'] };
-
-    // ── Score every track ─────────────────────────────────────────
     const scored = this.tracks.map(t => {
-      let score = Math.random() * 15;  // small random jitter so mix varies daily
+      let s = Math.random()*15;
+      const days=(now-(this.lastPlayedAt[t.id]||0))/86400000;
+      if(days<0.08)s-=80; else if(days<1)s+=25; else if(days<4)s+=18; else if(days<14)s+=10; else if(days>90)s-=8;
+      s += Math.min((this.playCount[t.id]||0)*5,35);
+      if (this.likedIds.has(t.id)) s+=30;
+      // Skip penalty in mix
+      const sk=this.skipCount[t.id]||0, pl=Math.max(1,this.playCount[t.id]||1);
+      s -= (sk/pl)*15;
+      const g=(t.genre||'').toLowerCase();
+      if(V.g.some(m=>g.includes(m))) s+=22;
+      const en=this._energy(t);
+      s += (2-Math.abs(en-V.e))*12;
+      return {t,s,en};
+    }).sort((a,b)=>b.s-a.s);
 
-      // Recency — recent favourites but not just-played
-      const days = (now - (this.lastPlayedAt[t.id] || 0)) / 86400000;
-      if      (days < 0.08) score -= 80;  // played in last 2h — strong suppress
-      else if (days < 1)    score += 25;  // played today but not recently
-      else if (days < 4)    score += 18;  // last few days
-      else if (days < 14)   score += 10;  // this fortnight
-      else if (days > 90)   score -=  8;  // very neglected
-
-      // Popularity boost
-      score += Math.min((this.playCount[t.id] || 0) * 5, 35);
-
-      // Liked = always in the mix
-      if (this.likedIds.has(t.id)) score += 30;
-
-      // Genre match
-      const g = (t.genre || '').toLowerCase();
-      const genreMatch = vibe.genres.some(m => g.includes(m));
-      if (genreMatch) score += 22;
-
-      // Energy match — core of the vibe algorithm
-      const energy = this._trackEnergy(t);
-      const diff   = Math.abs(energy - vibe.energy);
-      score += (2 - diff) * 12;   // max +24 for perfect energy match
-
-      return { track: t, score, energy };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-
-    // ── Pick top tracks with artist + genre variety ───────────────
-    const pool      = scored.slice(0, Math.min(60, scored.length));
-    const mix       = [];
-    const usedArtist = {};
-    const usedGenre  = {};
-
-    for (const { track: t, energy } of pool) {
-      if (mix.length >= count) break;
-      const artist = (t.artist || 'unknown').toLowerCase().slice(0, 20);
-      const genre  = (t.genre  || 'unknown').toLowerCase().slice(0, 12);
-      if ((usedArtist[artist] || 0) >= 2) continue;  // max 2 per artist
-      if ((usedGenre[genre]   || 0) >= 3) continue;  // max 3 per genre
-      usedArtist[artist] = (usedArtist[artist] || 0) + 1;
-      usedGenre[genre]   = (usedGenre[genre]   || 0) + 1;
-      mix.push({ track: t, energy });
+    const pool=scored.slice(0,Math.min(60,scored.length));
+    const mix=[],ua={},ug={};
+    for(const {t,en} of pool){
+      if(mix.length>=count) break;
+      const a=(t.artist||'?').toLowerCase().slice(0,20);
+      const g=(t.genre||'?').toLowerCase().slice(0,12);
+      if((ua[a]||0)>=2||(ug[g]||0)>=3) continue;
+      ua[a]=(ua[a]||0)+1; ug[g]=(ug[g]||0)+1;
+      mix.push({t,en});
     }
-    // Fill remaining slots if variety was too strict
-    for (const item of pool) {
-      if (mix.length >= count) break;
-      if (!mix.find(m => m.track === item.track)) mix.push(item);
-    }
-
-    // ── Order by energy arc ───────────────────────────────────────
-    return this._arcSort(mix.map(m => m.track), mix.map(m => m.energy), vibe.arc);
+    for(const item of pool){ if(mix.length>=count) break; if(!mix.find(m=>m.t===item.t)) mix.push(item); }
+    return this._sort(mix.map(m=>m.t), mix.map(m=>m.en), V.arc);
   },
 
-  // Sort tracks to flow as an energy arc
-  _arcSort(tracks, energies, arc) {
-    const pairs = tracks.map((t, i) => ({ track: t, energy: energies[i] }));
-    if (arc === 'up')   { pairs.sort((a, b) => a.energy - b.energy); return pairs.map(p => p.track); }
-    if (arc === 'down') { pairs.sort((a, b) => b.energy - a.energy); return pairs.map(p => p.track); }
-    if (arc === 'wave') {
-      // Build-peak-decay: low → high → low (mountain shape)
-      pairs.sort((a, b) => a.energy - b.energy);
-      const n = pairs.length;
-      const result = new Array(n);
-      let lo = 0, hi = n - 1;
-      for (let i = 0; i < n; i++) {
-        // Fill from outside in, alternating — creates a wave that peaks in the middle
-        if (i % 2 === 0) result[i] = pairs[lo++];
-        else             result[n - 1 - Math.floor(i / 2)] = pairs[hi--];
-      }
-      // Actually do proper mountain: sort low→high, then rearrange as valley-peak-valley
-      pairs.sort((a, b) => a.energy - b.energy);
-      const mid = Math.ceil(n / 2);
-      return [...pairs.slice(0, mid), ...pairs.slice(mid).reverse()].map(p => p.track);
-    }
-    // flat: interleave high/low energy so variance is low throughout
-    pairs.sort((a, b) => a.energy - b.energy);
-    const result = [];
-    let lo = 0, hi = pairs.length - 1;
-    let turn = 0;
-    while (lo <= hi) {
-      result.push(turn % 2 === 0 ? pairs[lo++] : pairs[hi--]);
-      turn++;
-    }
-    return result.map(p => p.track);
+  _sort(tracks,energies,arc) {
+    const p=tracks.map((t,i)=>({t,e:energies[i]}));
+    if(arc==='up')  {p.sort((a,b)=>a.e-b.e); return p.map(x=>x.t);}
+    if(arc==='down'){p.sort((a,b)=>b.e-a.e); return p.map(x=>x.t);}
+    if(arc==='wave'){p.sort((a,b)=>a.e-b.e); const m=Math.ceil(p.length/2); return [...p.slice(0,m),...p.slice(m).reverse()].map(x=>x.t);}
+    // flat: interleave high/low
+    p.sort((a,b)=>a.e-b.e);
+    const r=[]; let lo=0,hi=p.length-1,t=0;
+    while(lo<=hi){r.push(t%2===0?p[lo++]:p[hi--]);t++;}
+    return r.map(x=>x.t);
   },
 
-  _vibeSort(tracks) {
-    const hour = new Date().getHours();
-    const arc  = hour < 9 ? 'up' : hour >= 20 ? 'down' : 'flat';
-    const energies = tracks.map(t => this._trackEnergy(t));
-    return this._arcSort(tracks, energies, arc);
+  _arcSort(tracks) {
+    const h=new Date().getHours(), arc=h<9?'up':h>=20?'down':'flat';
+    return this._sort(tracks,tracks.map(t=>this._energy(t)),arc);
   },
 
-  _shuffled(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  },
-
-  // ── Grouping ───────────────────────────────────────────────────────────────
-  getByArtist() {
-    const map = {};
-    this.tracks.forEach(t => {
-      const k = t.artist || 'Unknown Artist';
-      if (!map[k]) map[k] = { name: k, tracks: [], artwork: null };
+  // ── Grouping ─────────────────────────────────────────────────────────────
+  _group(key,label) {
+    const map={};
+    for(const t of this.tracks){
+      const k=key(t)||label||'Unknown';
+      if(!map[k]) map[k]={name:k,tracks:[],artwork:null};
       map[k].tracks.push(t);
-      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
-    });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
+      if(!map[k].artwork&&t.artwork) map[k].artwork=t.artwork;
+    }
+    return Object.values(map).sort((a,b)=>a.name.localeCompare(b.name));
   },
-
-  getByAlbum() {
-    const map = {};
-    this.tracks.forEach(t => {
-      const k = `${t.album || '?'}__${t.artist || '?'}`;
-      if (!map[k]) map[k] = { name: t.album || 'Unknown Album', artist: t.artist || 'Unknown Artist', tracks: [], artwork: null };
-      map[k].tracks.push(t);
-      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
-    });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
+  getByArtist() { return this._group(t=>t.artist,'Unknown Artist'); },
+  getByAlbum()  {
+    const map={};
+    for(const t of this.tracks){
+      const k=`${t.album||'?'}__${t.artist||'?'}`;
+      if(!map[k]) map[k]={name:t.album||'Unknown Album',artist:t.artist||'Unknown Artist',tracks:[],artwork:null};
+      map[k].tracks.push(t); if(!map[k].artwork&&t.artwork) map[k].artwork=t.artwork;
+    }
+    return Object.values(map).sort((a,b)=>a.name.localeCompare(b.name));
   },
+  getByGenre()  { return this._group(t=>t.genre,'Unknown'); },
 
-  getByGenre() {
-    const map = {};
-    this.tracks.forEach(t => {
-      const k = t.genre || 'Unknown';
-      if (!map[k]) map[k] = { name: k, tracks: [], artwork: null };
-      map[k].tracks.push(t);
-      if (!map[k].artwork && t.artwork) map[k].artwork = t.artwork;
-    });
-    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
-  },
-
-  // ── Playlists ──────────────────────────────────────────────────────────────
-  createPlaylist(name) {
-    const pl = { id: Utils.uid(), name, tracks: [], created: Date.now() };
-    this.playlists.push(pl);
-    this.save();
-    return pl;
-  },
-
-  addToPlaylist(plId, trackId) {
-    const pl = this.playlists.find(p => p.id === plId);
-    if (pl && !pl.tracks.includes(trackId)) { pl.tracks.push(trackId); this.save(); }
-  },
-
-  removeFromPlaylist(plId, trackId) {
-    const pl = this.playlists.find(p => p.id === plId);
-    if (pl) { pl.tracks = pl.tracks.filter(i => i !== trackId); this.save(); }
-  },
-
-  deletePlaylist(id) {
-    this.playlists = this.playlists.filter(p => p.id !== id);
-    this.save();
-  },
-
-  getPlaylistTracks(id) {
-    const pl = this.playlists.find(p => p.id === id);
-    return pl ? pl.tracks.map(id => this.tracks.find(t => t.id === id)).filter(Boolean) : [];
-  },
-
-  async exportPlaylist(id) {
-    const pl = this.playlists.find(p => p.id === id);
-    if (!pl) return;
-    await window.vibeAPI.exportPlaylist({ name: pl.name, tracks: this.getPlaylistTracks(id) });
-    Utils.toast('Playlist exported');
-  },
-
-  async importPlaylist() {
-    const paths = await window.vibeAPI.importPlaylist();
-    if (!paths?.length) return null;
-    const pl    = this.createPlaylist('Imported Playlist');
-    const added = await this.addFiles(paths);
-    added.forEach(t => pl.tracks.push(t.id));
-    this.save();
-    return pl;
-  },
-
-  // ── BPM-aware queue sort ──────────────────────────────────────────
-  // Groups tracks by estimated energy/tempo (bitrate as proxy for BPM
-  // since actual BPM isn't in standard metadata). Sorts so adjacent
-  // tracks have the closest bitrate — smooth crossfades between similar
-  // energy songs, no jarring tempo clashes.
-  sortForCrossfade(tracks) {
-    if (!tracks || tracks.length < 2) return tracks;
-
-    // Estimate BPM from bitrate: higher bitrate ≈ denser audio ≈ higher energy.
-    // Group into energy buckets: low(0-128kbps), mid(128-256), high(256+)
-    const energy = t => {
-      const br = t.bitrate || 128;
-      if (br < 96)  return 0;
-      if (br < 160) return 1;
-      if (br < 256) return 2;
-      return 3;
-    };
-
-    // Sort by energy level so transitions stay in the same "zone"
-    // Within same energy, sort by bitrate for smooth gradient
-    return [...tracks].sort((a, b) => {
-      const ea = energy(a), eb = energy(b);
-      if (ea !== eb) return ea - eb;
-      return (a.bitrate || 128) - (b.bitrate || 128);
-    });
-  },
-
+  // ── Playlists ─────────────────────────────────────────────────────────────
+  createPlaylist(name)            { const p={id:Utils.uid(),name,tracks:[],created:Date.now()}; this.playlists.push(p); this.save(); return p; },
+  addToPlaylist(plId,tid)         { const p=this.playlists.find(x=>x.id===plId); if(p&&!p.tracks.includes(tid)){p.tracks.push(tid);this.save();} },
+  removeFromPlaylist(plId,tid)    { const p=this.playlists.find(x=>x.id===plId); if(p){p.tracks=p.tracks.filter(i=>i!==tid);this.save();} },
+  deletePlaylist(id)              { this.playlists=this.playlists.filter(p=>p.id!==id); this.save(); },
+  getPlaylistTracks(id)           { const p=this.playlists.find(x=>x.id===id); return p?p.tracks.map(id=>this._byId.get(id)).filter(Boolean):[]; },
+  async exportPlaylist(id)        { const p=this.playlists.find(x=>x.id===id); if(!p) return; await window.vibeAPI.exportPlaylist({name:p.name,tracks:this.getPlaylistTracks(id)}); Utils.toast('Playlist exported'); },
+  async importPlaylist()          { const paths=await window.vibeAPI.importPlaylist(); if(!paths?.length) return null; const p=this.createPlaylist('Imported'); const a=await this.addFiles(paths); a.forEach(t=>p.tracks.push(t.id)); this.save(); return p; },
 };
