@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="build/icons/512x512.png" alt="Vibe Logo" width="128"/>
+
 <br/>
 
 <img src="https://img.shields.io/badge/version-1.0.6-1db954?style=for-the-badge&labelColor=0a0a0a" alt="Version"/>
@@ -23,41 +25,38 @@ _Gapless crossfade · Smart daily mix · Clean dark UI · No streaming · Your m
 
 ## ✦ Features
 
-**Gapless Crossfade**
-Songs blend into each other seamlessly. Configurable overlap window — no silence, no hard cuts. The crossfade engine runs dual audio elements with Web Audio API gain ramping so both tracks play simultaneously during the transition.
+**Gapless Crossfade**  
+Seamless track transitions with configurable overlap. Both tracks play simultaneously during transitions using the Web Audio API.
 
-**Today's Mix**
-A smart daily playlist that adapts to the time of day. Morning gets a gentle build-up, midday peaks high, evening waves, night winds down. The algorithm scores every track using bitrate, duration, genre keywords, title signals, play history, and liked status — then orders them into an energy arc.
+**Today's Mix**  
+Smart daily playlist that adapts to the time of day. Algorithm scores tracks based on bitrate, duration, genre, play history, and liked status.
 
-**Smart Playlists**
-Four auto-generated playlists that stay fresh automatically:
+**Smart Playlists**  
+- ♥ **Liked Songs** — everything you've hearted  
+- ◷ **Recently Played** — your listening history  
+- ↑ **Most Played** — all-time favourites  
+- ✦ **Recently Added** — newest tracks in your library  
 
-- ♥ **Liked Songs** — everything you've hearted
-- ◷ **Recently Played** — your listening history
-- ↑ **Most Played** — your all-time favourites
-- ✦ **Recently Added** — newest tracks in your library
+**Now Playing Screen**  
+Full-screen overlay with blurred album art, animated album art, seek bar, transport controls, volume slider, and Up Next queue.
 
-**Now Playing Screen**
-Full-screen overlay with blurred album art backdrop, animated breathing album art, seek bar with scrubbing thumb, transport controls, volume slider, and an Up Next queue panel.
+**Smart Queue**  
+Queue only plays tracks from the selected playlist or context — no surprises.
 
-**Smart Queue**
-The queue reflects exactly what you played — play from Most Played and only those tracks queue up. Play from a playlist and only that playlist queues. No surprise all-library dumps.
+**Visualizer**  
+Four modes: Bars · Wave · Circle · Particles. Real-time sync via Web Audio API analyser.
 
-**Visualizer**
-Four modes: Bars · Wave · Circle · Particles. Synced to the Web Audio API analyser in real time.
+**Equalizer**  
+10-band EQ with presets: Flat, Bass Boost, Vocal Clarity, Electronic, Classical, etc.
 
-**Equalizer**
-10-band EQ with presets: Flat, Bass Boost, Vocal Clarity, Electronic, Classical, and more.
-
-**Delete from Disk**
-Right-click any track → Delete from Disk moves it to the OS trash (recoverable).
+**Delete from Disk**  
+Right-click → Delete moves tracks to OS trash (recoverable).
 
 ---
 
 ## ⬇ Installation
 
 ### Linux (Debian / Ubuntu)
-
 ```bash
 sudo dpkg -i vibe_1.0.6_amd64.deb
 ```
