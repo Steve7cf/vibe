@@ -58,7 +58,7 @@ Right-click → Delete moves tracks to OS trash (recoverable).
 
 ### Linux (Debian / Ubuntu)
 ```bash
-sudo dpkg -i vibe_1.0.6_amd64.deb
+sudo dpkg -i vibe_1.0.7_amd64.deb
 ```
 
 ### Windows
