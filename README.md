@@ -64,7 +64,7 @@ sudo dpkg -i vibe_1.0.6_amd64.deb
 
 ### Windows
 
-Download `vibe_1.0.6_Setup.exe` from the [Releases](../../releases) page and run the installer.
+coming soon
 
 ### Build from Source
 
@@ -95,7 +95,7 @@ npm start
 
 ## 🖥 Screenshots
 
-> Coming soon — add your screenshots to `docs/screenshots/` and reference them here.
+> Coming soon
 
 ---
 
@@ -145,31 +145,12 @@ npx electron-builder --linux deb
 # Windows .exe
 npx electron-builder --windows nsis
 
-# Both (via GitHub Actions on tag push)
-git tag -a v1.0.7 -m "Release v1.0.7"
-git push origin v1.0.7
-```
+
 
 See `.github/workflows/build.yml` for the automated CI/CD pipeline.
 
 ---
 
-## 🤝 Contributing
-
-```bash
-# Branch off develop
-git checkout -b feature/your-feature develop
-
-# Commit your changes
-git commit -m "feat: describe what you built"
-
-# Push and open a PR → develop
-git push origin feature/your-feature
-```
-
-PRs are merged into `develop`. Releases are cut from `main`.
-
----
 
 ## 📄 License
 
