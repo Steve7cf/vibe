@@ -95,7 +95,22 @@ npm start
 
 ## 🖥 Screenshots
 
-> Coming soon
+<p align="center">
+  <a href="images/home.png"><img src="images/home.png" width="30%"></a>
+  <a href="images/library.png"><img src="images/library.png" width="30%"></a>
+  <a href="images/playlist.png"><img src="images/playlist.png" width="30%"></a>
+</p>
+
+<p align="center">
+  <a href="images/now_playing.png"><img src="images/now_playing.png" width="30%"></a>
+  <a href="images/equalizer.png"><img src="images/equalizer.png" width="30%"></a>
+  <a href="images/queue.png"><img src="images/queue.png" width="30%"></a>
+</p>
+
+<p align="center">
+  <a href="images/light.png"><img src="images/light.png" width="30%"></a>
+  <a href="images/settings.png"><img src="images/settings.png" width="30%"></a>
+</p>
 
 ---
 
