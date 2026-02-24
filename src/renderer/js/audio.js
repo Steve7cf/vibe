@@ -141,20 +141,22 @@ const AudioEngine = {
   async play() {
     this._ensureCtx();
     if (this.ctx.state === 'suspended') await this.ctx.resume();
-    // After stop(), the element is at position 0 but paused with no pending decode.
-    // We must call load() again so the browser re-queues the media for playback.
+    // After stop(), the element is paused at t=0 but the browser's decode pipeline
+    // is flushed. Call load() to re-queue, then wait for HAVE_FUTURE_DATA (readyState≥3).
+    // We cap the wait at 800ms — far shorter than the old 1500ms blanket timeout.
     if (this._stopped && this._curEl.src) {
       this._stopped = false;
       this._curEl.load();
-      // Wait for enough data before playing to avoid silence gap
-      await new Promise(res => {
-        if (this._curEl.readyState >= 3) { res(); return; }
-        this._curEl.addEventListener('canplay', res, { once: true });
-        setTimeout(res, 1500); // fallback
-      });
+      if (this._curEl.readyState < 3) {
+        await new Promise(res => {
+          const done = () => { this._curEl.removeEventListener('canplay', done); res(); };
+          this._curEl.addEventListener('canplay', done, { once: true });
+          setTimeout(res, 800);
+        });
+      }
     }
     this._stopped = false;
-    try { await this._curEl.play(); } catch(e) { console.warn('[play]', e); }
+    try { await this._curEl.play(); } catch(e) { if (window.vibeAPI?.log) window.vibeAPI.log('WRN','[audio]',e.message); }
   },
 
   // ── Pre-load next track into background slot ─────────────────────
@@ -190,7 +192,7 @@ const AudioEngine = {
       // Start background slot from beginning
       this._nxtEl.currentTime = 0;
       this._nxtEl.playbackRate = this.config.speed;
-      this._nxtEl.play().catch(e => console.warn('[xfade]', e));
+      this._nxtEl.play().catch(() => {});
 
       // Current OUT: existing gain → 0
       this._curGain.gain.cancelScheduledValues(t);
